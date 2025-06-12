@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import datetime
 import json
 import logging
+import logging.config
 import os
 import sys
 
@@ -69,9 +70,10 @@ class MyNotionClient:
         """
 
         try:
+            # TODO: タイトルが「名前」固定になっている
             response = self.notion.pages.create(
                 parent={"database_id": database_id},
-                properties={"Name": {"title": [{"text": {"content": title}}]}},
+                properties={"名前": {"title": [{"text": {"content": title}}]}},
             )
 
             # 200OK以外はエラーを投げる
@@ -281,7 +283,7 @@ class MyNotionClient:
 
         # End of upload_file method
 
-    def get_mime_type_from_extension(file_path: str) -> MimeTypeInfo:
+    def get_mime_type_from_extension(self, file_path: str) -> MimeTypeInfo:
         """
         指定されたファイルパスの拡張子から、MIMEタイプおよびファイルタイプを判定します。
 
@@ -290,7 +292,7 @@ class MyNotionClient:
 
         戻り値:
             MimeTypeInfo: MIMEタイプおよびファイルタイプを含むオブジェクト。拡張子が未対応の場合は
-                  デフォルトで "application/octet-stream" および "image" を返します。
+                デフォルトで "application/octet-stream" および "image" を返します。
         """
 
         extension = os.path.splitext(file_path)[1].lower()
@@ -301,6 +303,8 @@ class MyNotionClient:
             ".png": MimeTypeInfo(mime_type="image/png", file_type="image"),
             ".gif": MimeTypeInfo(mime_type="image/gif", file_type="image"),
             ".webp": MimeTypeInfo(mime_type="image/webp", file_type="image"),
+            ".mp3": MimeTypeInfo(mime_type="audio/mpeg", file_type="audio"),
+            ".m4a": MimeTypeInfo(mime_type="audio/mp4", file_type="audio"),
         }
         return mime_types.get(
             extension,
@@ -348,7 +352,7 @@ def main():
 
         # コマンドライン引数を取得
         args = sys.argv[1:]
-        logger.info("Arguments:", args)
+        logger.info(f"Arguments: {args}")
 
         # Notionクライアントのインスタンスを作成
         notion = MyNotionClient(
