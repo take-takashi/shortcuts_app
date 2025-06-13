@@ -27,9 +27,13 @@ uv pip sync requirements.txt
 
 ## 新規セットアップ時のコマンド
 
+TODO: pyproject.tomlにしたい
+
 ```bash
 takashi@Mac shortcuts_app % python3 -m venv .venv
 takashi@Mac shortcuts_app % source .venv/bin/activate
 (.venv) takashi@Mac shortcuts_app % pip install uv
 (.venv) takashi@Mac shortcuts_app % uv pip install -r requirements.in
+
+# .example.envを参考に.envを作成、設定すること
 ```

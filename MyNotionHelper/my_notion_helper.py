@@ -55,6 +55,7 @@ class MyNotionHelper:
             raise Exception(f"Notionデータベースの取得に失敗しました: {e}")
 
     # 指定したNotionデータベースに、指定したタイトルで新しいページを作成する関数
+    # TODO: 空のプロパティでもNotionページは作れる？
     def create_notion_page(self, database_id: str, title: str) -> str:
         """
         指定したNotionデータベースに、指定したタイトルで新しいページを作成します。
@@ -175,6 +176,7 @@ class MyNotionHelper:
             )
 
     # 指定したNotionページにファイルをアップロードする関数
+    # TODO: 並列アップロードは可能か？
     def upload_file(self, page_id: str, file_path: str):
         """
         指定したNotionページにファイルをアップロードします。
