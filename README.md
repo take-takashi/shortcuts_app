@@ -1,4 +1,5 @@
 # shortcuts.app
+
 Mac, iOSのショートカット.appで使うスクリプトなどをまとめる
 
 ## python用仮想環境の作成
@@ -22,4 +23,13 @@ uv 0.7.12 (dc3fd4647 2025-06-06)
 (.venv) takashi@Mac shortcuts.app % uv pip compile requirements.in > requirements.txt
 # インストールコマンド
 uv pip sync requirements.txt
+```
+
+## 新規セットアップ時のコマンド
+
+```bash
+takashi@Mac shortcuts_app % python3 -m venv .venv
+takashi@Mac shortcuts_app % source .venv/bin/activate
+(.venv) takashi@Mac shortcuts_app % pip install uv
+(.venv) takashi@Mac shortcuts_app % uv pip install -r requirements.in
 ```
