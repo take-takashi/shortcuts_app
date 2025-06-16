@@ -1,14 +1,15 @@
-from dataclasses import dataclass
+import concurrent.futures
 import datetime
 import json
 import logging
 import logging.config
 import os
 import sys
+from dataclasses import dataclass
 
+import requests
 from dotenv import load_dotenv
 from notion_client import Client
-import requests
 
 # ===== Config Begin ===========================================================
 # .envを読み込む
@@ -175,36 +176,38 @@ class MyNotionClient:
                         )
 
             elif mode == "multi_part":
+                ## チャンクごとにアップロードする一時関数を定義
+                def upload_chunk(part_number: int, chunk: bytes):
+                    files = {
+                        "file": (file_name, chunk, mime_type_info.mime_type),
+                        "part_number": (None, str(part_number)),
+                    }
+                    self.logger.info(
+                        f"Uploading part {part_number} of {number_of_parts}..."
+                    )
+
+                    response = requests.post(
+                        url=upload_url,
+                        headers=upload_headers,
+                        files=files,
+                    )
+                    if response.status_code != 200:
+                        raise Exception(
+                            f"Failed to upload part {part_number}: {response.status_code} - {response.text}"
+                        )
+
                 with open(file_path, "rb") as f:
-                    # チャンクサイズごとにファイルを読み込む
-                    for part_number in range(1, number_of_parts + 1):
-                        chunk = f.read(self.CHUNK_SIZE)
-                        if not chunk:
-                            break
+                    chunks = [
+                        (i + 1, f.read(self.CHUNK_SIZE)) for i in range(number_of_parts)
+                    ]
 
-                        files = {
-                            # Provide the MIME content type of the file
-                            # as the 3rd argument.
-                            "file": (file_name, chunk, mime_type_info.mime_type),
-                            # Use a file name of `None` to treat this as a regular
-                            # form field and not a file.
-                            "part_number": (None, str(part_number)),
-                        }
-                        self.logger.info(
-                            f"Uploading part {part_number} of {number_of_parts}..."
-                        )
-
-                        # ファイルのチャンクをアップロード
-                        upload_response = requests.post(
-                            url=upload_url,
-                            headers=upload_headers,
-                            files=files,
-                        )
-
-                        if upload_response.status_code != 200:
-                            raise Exception(
-                                f"Failed to upload part {part_number}: {upload_response.status_code} - {upload_response.text}"
-                            )
+                # TODO CHECK: 一旦、5並列で実行する
+                with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                    futures = [
+                        executor.submit(upload_chunk, part_number, chunk)
+                        for part_number, chunk in chunks
+                    ]
+                    concurrent.futures.wait(futures)
 
                 # 全チャンクのアップロードが成功した場合は、完了通知を送信
                 complete_url = (
