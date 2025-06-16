@@ -31,6 +31,7 @@ class MyLoggerHelper:
         戻り値:
             logging.Logger: 設定済みのロガーインスタンス。
         """
+        # TODO: __name__だとMyLoggerHelperになってしまう
         logger = getLogger(__name__)
         with open("logging_config.json", "r") as f:
             log_config = json.load(f)
