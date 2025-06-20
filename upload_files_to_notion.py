@@ -5,6 +5,7 @@ import logging
 import logging.config
 import os
 import sys
+import time
 from dataclasses import dataclass
 
 import requests
@@ -178,30 +179,44 @@ class MyNotionClient:
             elif mode == "multi_part":
                 ## チャンクごとにアップロードする一時関数を定義
                 def upload_chunk(part_number: int, chunk: bytes):
-                    files = {
-                        "file": (file_name, chunk, mime_type_info.mime_type),
-                        "part_number": (None, str(part_number)),
-                    }
-                    self.logger.info(
-                        f"Uploading part {part_number} of {number_of_parts}..."
-                    )
-
-                    response = requests.post(
-                        url=upload_url,
-                        headers=upload_headers,
-                        files=files,
-                    )
-                    if response.status_code != 200:
-                        raise Exception(
-                            f"Failed to upload part {part_number}: {response.status_code} - {response.text}"
+                    # 各チャンクのリトライ回数を3回とする
+                    max_retries = 3
+                    for attempt in range(max_retries):
+                        files = {
+                            "file": (file_name, chunk, mime_type_info.mime_type),
+                            "part_number": (None, str(part_number)),
+                        }
+                        self.logger.info(
+                            f"Uploading part {part_number} of {number_of_parts}... (Attempt {attempt + 1})"
                         )
 
+                        response = requests.post(
+                            url=upload_url,
+                            headers=upload_headers,
+                            files=files,
+                        )
+                        # 200 OKの時は問題なし
+                        if response.status_code == 200:
+                            return
+                        # 200 OK以外の場合はリトライ回数が許すなら1秒後に再実行
+                        else:
+                            self.logger.warning(
+                                f"Attempt {attempt + 1} failed for part {part_number}: {response.status_code} - {response.text}"
+                            )
+                            if attempt < max_retries - 1:
+                                time.sleep(1)
+
+                    raise Exception(
+                        f"Failed to upload part {part_number} after {max_retries} attempts"
+                    )
+
+                # 実際にファイルを分割で読み込んで順次並列アップロードする
                 with open(file_path, "rb") as f:
                     chunks = [
                         (i + 1, f.read(self.CHUNK_SIZE)) for i in range(number_of_parts)
                     ]
 
-                # TODO CHECK: 一旦、5並列で実行する
+                # max_workers分割（デフォルト5）で実行する
                 with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                     futures = [
                         executor.submit(upload_chunk, part_number, chunk)
