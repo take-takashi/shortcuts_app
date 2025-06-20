@@ -1,7 +1,9 @@
+import concurrent.futures
 import json
 import logging
 import logging.config
 import os
+import time
 from dataclasses import dataclass
 
 import requests
@@ -54,28 +56,23 @@ class MyNotionHelper:
         except Exception as e:
             raise Exception(f"Notionデータベースの取得に失敗しました: {e}")
 
-    # 指定したNotionデータベースに、指定したタイトルで新しいページを作成する関数
-    # TODO: 空のプロパティでもNotionページは作れる？
-    def create_notion_page(self, database_id: str, title: str) -> str:
+    # NotionのDBに空のページを作成する関数
+    def create_blank_page(self, database_id: str) -> str:
         """
-        指定したNotionデータベースに、指定したタイトルで新しいページを作成します。
+        指定したNotionデータベースに空のページを作成します。
 
         引数:
-            database_id (str): ページを作成するNotionデータベースのID。
-            title (str): 新しく作成するNotionページのタイトル。
-
-        例外:
-            Exception: ページ作成に失敗した場合、またはレスポンスが有効なNotionページオブジェクトでない場合に発生します。
+            database_id (str): ページを作成する対象のNotionデータベースID。
 
         戻り値:
-            作成したpege_id。
-        """
+            str: 作成されたページのID。
 
+        例外:
+            Exception: ページの作成に失敗した場合に発生します。
+        """
         try:
-            # TODO: タイトルが「名前」固定になっている
             response = self.notion.pages.create(
                 parent={"database_id": database_id},
-                properties={"名前": {"title": [{"text": {"content": title}}]}},
             )
 
             # 200OK以外はエラーを投げる
@@ -84,11 +81,10 @@ class MyNotionHelper:
 
             # 作成したpage_idを返す
             return response.get("id")
-
         except Exception as e:
             raise Exception(f"Failed to create page: {e}")
 
-        # End of create_notion_page method
+    # End of create_blank_page method
 
     # 指定したNotionページ内のすべての子ブロック（コンテンツ）を削除する関数
     def delete_page_content(self, page_id: str) -> bool:
@@ -176,7 +172,6 @@ class MyNotionHelper:
             )
 
     # 指定したNotionページにファイルをアップロードする関数
-    # TODO: 並列アップロードは可能か？
     def upload_file(self, page_id: str, file_path: str):
         """
         指定したNotionページにファイルをアップロードします。
@@ -264,36 +259,52 @@ class MyNotionHelper:
                         )
 
             elif mode == "multi_part":
-                with open(file_path, "rb") as f:
-                    # チャンクサイズごとにファイルを読み込む
-                    for part_number in range(1, number_of_parts + 1):
-                        chunk = f.read(self.CHUNK_SIZE)
-                        if not chunk:
-                            break
-
+                # チャンクごとにアップロードする一時関数を定義
+                def upload_chunk(part_number: int, chunk: bytes):
+                    # 各チャンクのリトライ回数を3回とする
+                    max_retries = 3
+                    for attempt in range(max_retries):
                         files = {
-                            # Provide the MIME content type of the file
-                            # as the 3rd argument.
                             "file": (file_name, chunk, mime_type_info.mime_type),
-                            # Use a file name of `None` to treat this as a regular
-                            # form field and not a file.
                             "part_number": (None, str(part_number)),
                         }
                         self.logger.info(
-                            f"Uploading part {part_number} of {number_of_parts}..."
+                            f"Uploading part {part_number} of {number_of_parts}... (Attempt {attempt + 1})"
                         )
 
-                        # ファイルのチャンクをアップロード
-                        upload_response = requests.post(
+                        response = requests.post(
                             url=upload_url,
                             headers=upload_headers,
                             files=files,
                         )
-
-                        if upload_response.status_code != 200:
-                            raise Exception(
-                                f"Failed to upload part {part_number}: {upload_response.status_code} - {upload_response.text}"
+                        # 200 OKの時は問題なし
+                        if response.status_code == 200:
+                            return
+                        # 200 OK以外の場合はリトライ回数が許すなら1秒後に再実行
+                        else:
+                            self.logger.warning(
+                                f"Attempt {attempt + 1} failed for part {part_number}: {response.status_code} - {response.text}"
                             )
+                            if attempt < max_retries - 1:
+                                time.sleep(1)
+
+                    raise Exception(
+                        f"Failed to upload part {part_number} after {max_retries} attempts"
+                    )
+
+                # 実際にファイルを分割で読み込んで順次並列アップロードする
+                with open(file_path, "rb") as f:
+                    chunks = [
+                        (i + 1, f.read(self.CHUNK_SIZE)) for i in range(number_of_parts)
+                    ]
+
+                # max_workers分割（デフォルト5）で実行する
+                with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                    futures = [
+                        executor.submit(upload_chunk, part_number, chunk)
+                        for part_number, chunk in chunks
+                    ]
+                    concurrent.futures.wait(futures)
 
                 # 全チャンクのアップロードが成功した場合は、完了通知を送信
                 complete_url = (

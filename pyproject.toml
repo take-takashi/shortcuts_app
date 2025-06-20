@@ -1,0 +1,12 @@
+[project]
+name = "shortcuts_app"
+version = "0.1.0"
+description = "Mac用ショートカットappで使うpythonスクリプト集"
+requires-python = ">=3.13"
+dependencies = [
+    "notion-client==2.3.0",
+    "python-dotenv==1.1.0",
+    "requests==2.32.3",
+    "yt-dlp==2025.5.22",
+    "ffmpeg-python==0.2.0"
+]

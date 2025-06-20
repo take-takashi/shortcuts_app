@@ -8,7 +8,7 @@ from MyPathHelper import MyPathHelper
 
 class MyLoggerHelper:
     @staticmethod
-    def setup_logger(log_dir: str = "") -> Logger:
+    def setup_logger(logger_name: str = "", log_dir: str = "") -> Logger:
         """
         ロガーをセットアップして返します。
 
@@ -25,14 +25,14 @@ class MyLoggerHelper:
         6. 設定済みのロガーインスタンスを返す。
 
         引数:
+            logger_name (str): getLogger時の名前。
             log_dir (str): ログファイルの出力先ディレクトリ。
             空文字列の場合は適切なパスに置き換えられる。
 
         戻り値:
             logging.Logger: 設定済みのロガーインスタンス。
         """
-        # TODO: __name__だとMyLoggerHelperになってしまう
-        logger = getLogger(__name__)
+        logger = getLogger(logger_name)
         with open("logging_config.json", "r") as f:
             log_config = json.load(f)
 

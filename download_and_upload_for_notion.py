@@ -17,7 +17,7 @@ NOTION_VERSION = "2022-06-28"
 LOG_DIR = os.getenv("LOG_DIR", "~/Downloads")
 
 # ===== Config End ============================================================
-logger = MyLoggerHelper.setup_logger(LOG_DIR)
+logger = MyLoggerHelper.setup_logger(__name__, LOG_DIR)
 
 
 @dataclass
