@@ -1,10 +1,12 @@
 import datetime
 import json
-from logging import getLogger, config, Logger
 import os
+import pprint
 import sys
+from logging import Logger, config, getLogger
 
 from MyPathHelper import MyPathHelper
+
 
 class MyLoggerHelper:
     @staticmethod
@@ -49,3 +51,26 @@ class MyLoggerHelper:
         # ログ設定を適用
         config.dictConfig(log_config)
         return logger
+
+    @staticmethod
+    def fprint(obj: object) -> str:
+        """
+        オブジェクトを整形して文字列として返します。
+
+        この関数は、与えられた任意のPythonオブジェクトを、
+        JSON形式でインデント付きの文字列に変換します。
+        JSON変換が失敗した場合は、pprintを使って可読性の高い文字列にフォールバックします。
+
+        引数:
+            obj (object): 任意のPythonオブジェクト。
+
+        戻り値:
+            str: 整形済みの文字列（JSON形式またはpprint形式）。
+        """
+        try:
+            return json.dumps(obj, indent=2, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return pprint.pformat(obj)
+
+
+# End
