@@ -37,6 +37,12 @@ def main():
         # コマンドライン引数をそれぞれファイルパスとして処理する
         files = args
 
+        # Notionデータベースに空のページを作成
+        # ※複数のファイルをアップロードした場合は、最後のファイルの名前になる
+        page_id = notion.create_blank_page(
+            database_id=NOTION_DATABASE_ID,
+        )
+
         for file in files:
             # fileの存在確認
             if not os.path.isfile(file):
@@ -50,11 +56,6 @@ def main():
                     f"5GBを超えるファイルはアップロードしません。: {file} (size: {file_size} bytes)"
                 )
                 continue
-
-            # Notionデータベースに空のページを作成
-            page_id = notion.create_blank_page(
-                database_id=NOTION_DATABASE_ID,
-            )
 
             # ページタイトルをファイル名に変更
             notion.change_page_title(page_id, os.path.basename(file))
