@@ -358,3 +358,68 @@ class MyFfmpegHelper:
 
         except Exception as e:
             raise Exception(f"エラーが発生しました: {e}")
+
+    @staticmethod
+    def is_vbr(input_video: str, sample_duration: int = 10) -> bool:
+        """
+        動画がVBR（可変ビットレート）かどうかを大まかに判定する。
+        指定された秒数分のパケットサイズをサンプリングし、そのばらつきから判断する。
+
+        Args:
+            input_video (str): 動画ファイルのパス。
+            sample_duration (int): 分析する動画の先頭からの秒数。デフォルトは10秒。
+
+        Returns:
+            bool: VBRと判定された場合はTrue、CBRと判定された場合はFalse。
+
+        Raises:
+            Exception: ffprobeの実行中にエラーが発生した場合。
+        """
+        try:
+            cmd = [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "packet=size",
+                "-of",
+                "csv=p=0",
+                "-read_intervals",
+                f"%+{sample_duration}",
+                input_video,
+            ]
+
+            output = (
+                subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+                .decode("utf-8")
+                .strip()
+            )
+
+            if not output:
+                # パケット情報が取得できない場合は、判定不能としてCBRとみなす
+                return False
+
+            packet_sizes = [int(s.strip()) for s in output.splitlines()]
+
+            if len(packet_sizes) < 2:
+                # パケットが1つ以下の場合は、判定不能としてCBRとみなす
+                return False
+
+            # パケットサイズの標準偏差を計算
+            mean = sum(packet_sizes) / len(packet_sizes)
+            variance = sum(
+                [((x - mean) ** 2) for x in packet_sizes]
+            ) / len(packet_sizes)
+            std_dev = math.sqrt(variance)
+
+            # 標準偏差が平均値の10%を超える場合はVBRと判定
+            # この閾値は経験的なもので、調整が必要な場合がある
+            if std_dev > mean * 0.1:
+                return True
+            else:
+                return False
+
+        except Exception as e:
+            raise Exception(f"エラーが発生しました: {e}")
