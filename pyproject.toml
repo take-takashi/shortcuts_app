@@ -10,3 +10,11 @@ dependencies = [
     "yt-dlp==2025.5.22",
     "ffmpeg-python==0.2.0"
 ]
+
+[project.optional-dependencies]
+test = [
+    "pytest==8.4.1"
+]
+
+[tool.setuptools]
+packages = ["MyPathHelper", "MyNotionHelper", "MyFfmpegHelper", "MyLoggerHelper"]
