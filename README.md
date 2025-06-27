@@ -40,3 +40,7 @@ takashi@Mac shortcuts_app % source .venv/bin/activate
 
 # .example.envを参考に.envを作成、設定すること
 ```
+
+## memo
+
+- TODO: My***をsrcに移動
