@@ -3,6 +3,7 @@ import sys
 
 from dotenv import load_dotenv
 
+from MyFfmpegHelper import MyFfmpegHelper
 from MyLoggerHelper import MyLoggerHelper
 from MyNotionHelper import MyNotionHelper
 
@@ -49,19 +50,30 @@ def main():
                 logger.error(f"File not found: {file}")
                 continue
 
+            # 動画ファイルかどうかの判定
+            flg_video = False
+
             # ファイルのサイズをチェックし、5GB以下であればそのままアップロード
             file_size = os.path.getsize(file)
             if file_size > 5 * 1024 * 1024 * 1024:  # 5GB
-                logger.warning(
-                    f"5GBを超えるファイルはアップロードしません。: {file} (size: {file_size} bytes)"
-                )
-                continue
+                # 動画ファイルかどうかを判別し、動画ファイルであれば動画用のアップロードを行う
+                if MyFfmpegHelper.is_video(file):
+                    flg_video = True
+                else:
+                    # 動画ファイル以外の5GiB超えのファイルはアップロードしない
+                    logger.warning(
+                        f"5GBを超えるファイルはアップロードしません。: {file} (size: {file_size} bytes)"
+                    )
+                    continue
 
             # ページタイトルをファイル名に変更
             notion.change_page_title(page_id, os.path.basename(file))
 
             # ファイルをページにアップロードする
-            notion.upload_file(page_id, file)
+            if flg_video:
+                notion.upload_video(page_id, file)
+            else:
+                notion.upload_file(page_id, file)
 
             logger.info(f"Successfully processed file: {file}")
 

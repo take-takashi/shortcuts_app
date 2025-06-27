@@ -8,6 +8,9 @@ from dataclasses import dataclass
 
 import requests
 from notion_client import Client
+from MyFfmpegHelper import MyFfmpegHelper
+
+
 
 
 @dataclass
@@ -382,6 +385,40 @@ class MyNotionHelper:
             raise Exception(f"Notionへのアップロードに失敗しました: {e}")
 
         # End of upload_file method
+
+    # 指定したNotionページに動画をアップロードする関数（5GiB超え分割機能有）
+    def upload_video(self, page_id: str, file_path: str):
+        """
+        指定したNotionページに動画をアップロードします。
+        5GiBを超える動画はFFMPEGで分割してアップロードします。
+
+        引数:
+            page_id (str): ファイルをアップロードするNotionページのID。
+            file_path (str): アップロードするファイルのパス。
+
+        例外:
+            Exception: ファイルアップロードに失敗した場合に発生します。
+
+        戻り値:
+            なし
+        """
+        # ファイルの存在を確認
+        if not os.path.isfile(file_path):
+            raise Exception(f"File not found: {file_path}")
+
+        files: list[str] = []
+
+        # ファイルサイズが5GiBを超えていたらファイルを分割する
+        if os.path.getsize(file_path) > 5 * 1024 * 1024 * 1024:
+            split_size = (5 * 1024**3) - (1024**2 * 100)  # 5GiBとマージン
+            files = MyFfmpegHelper.split_video_lossless_by_keyframes(file_path, split_size_bytes=split_size)
+        else:
+            files.append(file_path)
+
+        # files分、ファイルをアップロードする
+        for file in files:
+            self.upload_file(page_id, file)
+
 
     # ファイルパスを渡して拡張子からMIMEタイプを返す関数
     def get_mime_type_from_extension(self, file_path: str) -> MimeTypeInfo:

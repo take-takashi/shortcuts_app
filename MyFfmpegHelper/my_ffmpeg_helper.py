@@ -222,7 +222,6 @@ class MyFfmpegHelper:
 
         return split_points
 
-
     @staticmethod
     def sample_get_keyframes(input_video: str) -> str:
         """
@@ -263,6 +262,39 @@ class MyFfmpegHelper:
             raise Exception(f"エラーが発生しました: {e}")
 
     @staticmethod
+    def is_video(file_path: str) -> bool:
+        """
+        指定されたファイルが動画ファイルかどうかを判定します。
+
+        Args:
+            file_path (str): 判定するファイルのパス。
+
+        Returns:
+            bool: 動画ファイルの場合はTrue、そうでない場合はFalse。
+        """
+        try:
+            result = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=codec_type",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    file_path,
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return "video" in result.stdout
+        except subprocess.CalledProcessError:
+            return False
+
+    @staticmethod
     def split_video_lossless_by_keyframes(
         input_video: str, output_dir: str = None, split_size_bytes: int = 5 * 1024**3
     ) -> list[str]:
@@ -281,7 +313,6 @@ class MyFfmpegHelper:
             Exception: 分割中にエラーが発生した場合。
         """
         try:
-
             if output_dir is None:
                 output_dir = os.path.dirname(input_video)
 
@@ -295,10 +326,13 @@ class MyFfmpegHelper:
             keyframes = [0.0] + keyframes + [duration]
 
             output_files = []
+            # 元のファイル名を取得
+            base_name = os.path.splitext(os.path.basename(input_video))[0]
+            # 分割数分だけ分割する
             for i in range(len(keyframes) - 1):
                 start = keyframes[i]
                 end = keyframes[i + 1]
-                output_file = os.path.join(output_dir, f"part_{i+1:03}.mp4")
+                output_file = os.path.join(output_dir, f"{base_name}_part{i + 1}.mp4")
 
                 cmd = [
                     "ffmpeg",
@@ -312,7 +346,12 @@ class MyFfmpegHelper:
                     "copy",
                     output_file,
                 ]
-                subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(
+                    cmd,
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
                 output_files.append(output_file)
 
             return output_files
