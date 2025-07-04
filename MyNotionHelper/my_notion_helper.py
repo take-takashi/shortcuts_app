@@ -191,6 +191,7 @@ class MyNotionHelper:
         """
 
         # TODO: 5GBを超える場合は、パートに分割してアップロードしたい（優先度：低　ffmpg使用か）
+        # TODO: アップロードする際に判断すればいい
 
         try:
             # 20MB以下ならsingle_part、20MB超ならmulti_partとする（Notion APIの仕様）

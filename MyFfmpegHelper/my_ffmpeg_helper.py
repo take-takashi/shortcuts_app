@@ -408,11 +408,15 @@ class MyFfmpegHelper:
                 return False
 
             # パケットサイズの標準偏差を計算
+            # TODO: これ問題
             mean = sum(packet_sizes) / len(packet_sizes)
             variance = sum(
                 [((x - mean) ** 2) for x in packet_sizes]
             ) / len(packet_sizes)
             std_dev = math.sqrt(variance)
+
+            print("mean = ", mean * 0.1)
+            print("std_dev = ", std_dev)
 
             # 標準偏差が平均値の10%を超える場合はVBRと判定
             # この閾値は経験的なもので、調整が必要な場合がある
