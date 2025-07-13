@@ -47,7 +47,9 @@ def download_audio_from_audee(url, download_dir="."):
         # --- メタデータ情報の取得 ---
         print("メタデータ情報を取得しています...")
         try:
-            program_name = driver.find_element(By.CSS_SELECTOR, "h2.box-program-ttl").text
+            program_name = driver.find_element(
+                By.CSS_SELECTOR, "h2.box-program-ttl"
+            ).text
             episode_title = driver.find_element(
                 By.CSS_SELECTOR, "h3.ttl-cmn-detail .ttl-inner"
             ).text
@@ -96,7 +98,9 @@ def download_audio_from_audee(url, download_dir="."):
         final_filepath = os.path.join(download_dir, final_filename)
 
         # ファイルをダウンロード
-        print(f"音声ファイルを一時ファイルとしてダウンロードしています: {temp_filepath}")
+        print(
+            f"音声ファイルを一時ファイルとしてダウンロードしています: {temp_filepath}"
+        )
         response = requests.get(audio_src, stream=True)
         response.raise_for_status()  # エラーがあれば例外を発生させる
 
@@ -175,7 +179,9 @@ def download_audio_from_audee(url, download_dir="."):
         os.remove(temp_filepath)
 
     except TimeoutException:
-        print("タイムアウトエラー: 指定された音声コンテンツが時間内に見つかりませんでした。")
+        print(
+            "タイムアウトエラー: 指定された音声コンテンツが時間内に見つかりませんでした。"
+        )
         # デバッグ用にHTMLを保存
         html_path = os.path.join(download_dir, "error_page.html")
         with open(html_path, "w", encoding="utf-8") as f:
@@ -196,7 +202,9 @@ def download_audio_from_audee(url, download_dir="."):
 
 if __name__ == "__main__":
     # コマンドライン引数の設定
-    parser = argparse.ArgumentParser(description="audee.jpから音声ファイルをダウンロードします。")
+    parser = argparse.ArgumentParser(
+        description="audee.jpから音声ファイルをダウンロードします。"
+    )
     parser.add_argument("url", help="対象のAuDeeページのURL")
     parser.add_argument(
         "--download_dir",
