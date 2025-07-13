@@ -41,6 +41,16 @@ takashi@Mac shortcuts_app % source .venv/bin/activate
 # .example.envを参考に.envを作成、設定すること
 ```
 
+## `mise` 導入後の新しいパッケージインストールコマンド
+
+```bash
+# まず、pyproject.tomlにパッケージの追加内容を記載してから
+
+.venvtakashi@Mac shortcuts_app % uv pip install selenium
+.venvtakashi@Mac shortcuts_app % uv sync
+
+```
+
 ## memo
 
 - TODO: My***をsrcに移動

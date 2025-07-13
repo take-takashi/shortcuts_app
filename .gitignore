@@ -126,3 +126,9 @@ dmypy.json
 # VS Code
 .vscode/
 .DS_Store
+
+# Downloaded media files
+*.mp3
+
+# Debug files
+error_page.html
