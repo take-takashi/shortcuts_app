@@ -4,6 +4,7 @@ import re
 import subprocess
 import requests
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from login_bitfan import login_bitfan
 
 def sanitize_filename(filename):
     """ファイル名として使えない文字を全角アンダースコアに置換する"""
@@ -17,9 +18,17 @@ def download_audio_from_bitfan_playwright(url, download_dir="."):
     with sync_playwright() as p:
         browser = None
         try:
+            STORAGE_STATE_PATH = "bitfan_storage_state.json"
+            if not os.path.exists(STORAGE_STATE_PATH):
+                print("ログイン情報が見つかりません。ログインプロセスを開始します。")
+                login_bitfan()
+                if not os.path.exists(STORAGE_STATE_PATH):
+                    print("ログインに失敗したか、ログイン情報が保存されませんでした。処理を中断します。")
+                    return
+
             print("Playwrightでブラウザを起動しています...")
             browser = p.chromium.launch(headless=True)
-            context = browser.new_context(storage_state="bitfan_storage_state.json")
+            context = browser.new_context(storage_state=STORAGE_STATE_PATH)
             page = context.new_page()
             print(f"ページにアクセスしています: {url}")
             page.goto(url, wait_until="load")
