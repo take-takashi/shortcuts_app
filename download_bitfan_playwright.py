@@ -19,7 +19,8 @@ def download_audio_from_bitfan_playwright(url, download_dir="."):
         try:
             print("Playwrightでブラウザを起動しています...")
             browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
+            context = browser.new_context(storage_state="bitfan_storage_state.json")
+            page = context.new_page()
             print(f"ページにアクセスしています: {url}")
             page.goto(url, wait_until="load")
 

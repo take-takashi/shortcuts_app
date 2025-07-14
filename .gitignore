@@ -95,7 +95,7 @@ Pipfile.lock
 # poetry
 poetry.lock
 
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow
+# PEP 582; used by e.com/David-OConnor/pyflow
 __pypackages__/
 
 # Celery
@@ -132,3 +132,6 @@ dmypy.json
 
 # Debug files
 error_page.html
+
+# bitfan storage state
+bitfan_storage_state.json
