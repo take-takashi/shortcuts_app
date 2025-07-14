@@ -2,14 +2,19 @@ import argparse
 import os
 import re
 import subprocess
+
 import requests
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import sync_playwright
+
 from login_bitfan import login_bitfan
+
 
 def sanitize_filename(filename):
     """ファイル名として使えない文字を全角アンダースコアに置換する"""
     filename = re.sub(r"^vol\.\d+\s", "", filename)
     return re.sub(r'[\\/:*?"<>|\s]', "＿", filename)
+
 
 def download_audio_from_bitfan_playwright(url, download_dir="."):
     """
@@ -23,7 +28,9 @@ def download_audio_from_bitfan_playwright(url, download_dir="."):
                 print("ログイン情報が見つかりません。ログインプロセスを開始します。")
                 login_bitfan()
                 if not os.path.exists(STORAGE_STATE_PATH):
-                    print("ログインに失敗したか、ログイン情報が保存されませんでした。処理を中断します。")
+                    print(
+                        "ログインに失敗したか、ログイン情報が保存されませんでした。処理を中断します。"
+                    )
                     return
 
             print("Playwrightでブラウザを起動しています...")
@@ -35,10 +42,14 @@ def download_audio_from_bitfan_playwright(url, download_dir="."):
 
             # --- メタデータ情報の取得 ---
             print("メタデータ情報を取得しています...")
-            program_name = page.locator("meta[property='og:site_name']").get_attribute("content")
+            program_name = page.locator("meta[property='og:site_name']").get_attribute(
+                "content"
+            )
             episode_title = page.locator("h1.p-clubArticle__name").inner_text()
             artist_name = program_name
-            cover_image_url = page.locator("div.p-clubArticle__thumb img").get_attribute("src")
+            cover_image_url = page.locator(
+                "div.p-clubArticle__thumb img"
+            ).get_attribute("src")
 
             print(f"  番組名: {program_name}")
             print(f"  エピソード名: {episode_title}")
@@ -48,7 +59,7 @@ def download_audio_from_bitfan_playwright(url, download_dir="."):
             print("音声プレーヤーのiframeを探しています...")
             sound_iframe_locator = page.locator(".sound-content")
             sound_frame = sound_iframe_locator.frame_locator(":scope")
-            
+
             print("音声ファイルのURLを探しています...")
             audio_locator = sound_frame.locator("audio")
             audio_src = audio_locator.get_attribute("src")
@@ -72,7 +83,7 @@ def download_audio_from_bitfan_playwright(url, download_dir="."):
             print(
                 f"音声ファイルを一時ファイルとしてダウンロードしています: {temp_filepath}"
             )
-            
+
             response = requests.get(audio_src, stream=True)
             response.raise_for_status()
 
@@ -80,12 +91,12 @@ def download_audio_from_bitfan_playwright(url, download_dir="."):
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
             print("ダウンロードが完了しました。")
-            
+
             # --- ffmpeg処理 ---
             if cover_image_url:
                 temp_cover_path = os.path.join(download_dir, "temp_cover.jpg")
                 print(f"カバー画像をダウンロードしています: {temp_cover_path}")
-                
+
                 cover_res = requests.get(cover_image_url)
                 with open(temp_cover_path, "wb") as f:
                     f.write(cover_res.content)
@@ -155,16 +166,17 @@ def download_audio_from_bitfan_playwright(url, download_dir="."):
 
             os.remove(temp_filepath)
 
-            
-            
         except PlaywrightTimeoutError:
-            print("タイムアウトエラー: ページの読み込みまたは要素の取得に時間がかかりすぎました。")
+            print(
+                "タイムアウトエラー: ページの読み込みまたは要素の取得に時間がかかりすぎました。"
+            )
         except Exception as e:
             print(f"予期せぬエラーが発生しました: {e}")
         finally:
             if browser:
                 print("ブラウザを閉じています...")
                 browser.close()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -180,5 +192,5 @@ if __name__ == "__main__":
     download_directory = os.path.abspath(args.download_dir)
     if not os.path.exists(download_directory):
         os.makedirs(download_directory)
-    
+
     download_audio_from_bitfan_playwright(args.url, download_directory)
