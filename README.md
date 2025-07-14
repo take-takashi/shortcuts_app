@@ -51,6 +51,12 @@ takashi@Mac shortcuts_app % source .venv/bin/activate
 
 ```
 
+## `Playwright` のインストール
+
+```bash
+.venvtakashi@Mac shortcuts_app % python -m playwright install
+```
+
 ## memo
 
 - TODO: My***をsrcに移動
