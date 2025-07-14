@@ -10,7 +10,8 @@ dependencies = [
     "yt-dlp==2025.5.22",
     "ffmpeg-python==0.2.0",
     "selenium==4.34.2",
-    "webdriver-manager==4.0.2"
+    "webdriver-manager==4.0.2",
+    "playwright==1.53.0"
 ]
 
 [project.optional-dependencies]
