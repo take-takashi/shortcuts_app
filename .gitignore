@@ -135,3 +135,6 @@ error_page.html
 
 # bitfan storage state
 bitfan_storage_state.json
+
+# Test data
+tests/private_data/
