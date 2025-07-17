@@ -51,6 +51,12 @@ takashi@Mac shortcuts_app % source .venv/bin/activate
 
 ```
 
+## packageのメモ
+
+- selenuim, webdriver-manager: ブラウザ操作（今は不要）
+- playwright: ブラウザ操作その2（不要？）
+- beautifulsoup4, lxml: HTMLファイルの構造操作（上記2つから乗り換え）
+
 ## `Playwright` のインストール
 
 ```bash
