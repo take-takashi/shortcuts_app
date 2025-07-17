@@ -12,7 +12,9 @@ dependencies = [
     "selenium==4.34.2",
     "webdriver-manager==4.0.2",
     "playwright==1.53.0",
-    "pathvalidate==3.3.1"
+    "pathvalidate==3.3.1",
+    "beautifulsoup4==4.13.4",
+    "lxml==6.0.0"
 ]
 
 [project.optional-dependencies]
