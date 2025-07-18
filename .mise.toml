@@ -4,3 +4,15 @@ python = "3.13"
 [env]
 _.python.venv = { path = ".venv", create = true }
 SAMPLE = "Hello, sample!"
+
+[tasks.show-tools-extract_audio_info-audee]
+description = "audio_info_extractorのチェック用（audee）"
+run = '''
+python -m tools.extract_audio_info tests/private_data/test_audee_page.html --domain audee.jp
+'''
+
+[tasks.show-tools-extract_audio_info-bitfan]
+description = "audio_info_extractorのチェック用（bitfan）"
+run = '''
+python -m tools.extract_audio_info tests/private_data/test_bitfan_page.html --domain bitfan.net
+'''
