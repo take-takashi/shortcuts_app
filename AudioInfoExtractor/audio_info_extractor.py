@@ -1,10 +1,9 @@
-
-import json
+import html
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-import json
-from abc import ABC, abstractmethod
-from typing import TypedDict
+
+from bs4 import BeautifulSoup
 
 
 # --- 型定義 ---
@@ -26,52 +25,40 @@ class AudioInfoExtractorBase(ABC):
         self.logger = logger
 
     @abstractmethod
-    def get_audio_info(self, soup) -> AudioInfo | None:
-        """HTML(BeautifulSoupオブジェクト)から音声情報を取得する"""
+    def get_audio_info(self, html_content: str) -> AudioInfo | None:
+        """HTML文字列から音声情報を取得する"""
         pass
 
 
 class AudeeInfoExtractor(AudioInfoExtractorBase):
     """audee.jpの音声情報抽出クラス"""
 
-    def get_audio_info(self, soup) -> AudioInfo | None:
+    def get_audio_info(self, html_content: str) -> AudioInfo | None:
         self.logger.info("audee.jpのメタデータと音声URLを解析します...")
         try:
-            program_name = soup.select_one("meta[property='og:site_name']")["content"]
-            episode_title = soup.select_one("meta[property='og:title']")["content"]
-            artist_name = program_name
+            soup = BeautifulSoup(html_content, "html.parser")
+            program_name = soup.select_one(
+                "h2.box-program-ttl.ttl-cmn-lev1 a"
+            ).get_text(strip=True)
+            episode_title_full = soup.select_one("div.ttl-inner").get_text(strip=True)
+            # 日付部分を除去してエピソードタイトルを抽出
+            episode_title = episode_title_full.split(")", 1)[-1].strip()
+
+            # パーソナリティ名を番組名から抽出
+            # 例: 「伊藤沙莉のsaireek channel」から「伊藤沙莉」を抽出
+            if "の" in program_name:
+                artist_name = program_name.split("の", 1)[0].strip()
+            else:
+                artist_name = program_name  # 「の」がない場合は番組名をそのまま使用
+
             cover_image_url = soup.select_one("meta[property='og:image']")["content"]
 
             audio_src = None
-            json_ld_scripts = soup.find_all("script", type="application/ld+json")
-
-            def find_audio_url_in_json(data):
-                if isinstance(data, dict):
-                    if data.get("@type") == "AudioObject" and data.get("contentUrl"):
-                        return data["contentUrl"]
-                    for key, value in data.items():
-                        found = find_audio_url_in_json(value)
-                        if found:
-                            return found
-                elif isinstance(data, list):
-                    for item in data:
-                        found = find_audio_url_in_json(item)
-                        if found:
-                            return found
-                return None
-
-            for script in json_ld_scripts:
-                try:
-                    json_data = json.loads(script.string)
-                    audio_src = find_audio_url_in_json(json_data)
-                    if audio_src:
-                        break
-                except (json.JSONDecodeError, AttributeError):
-                    continue
-
-            if not audio_src:
-                self.logger.error("HTML内のJSON-LDから音声URLが見つかりませんでした。")
-                return None
+            match = re.search(
+                r'<audio.*?<source src="([^"]+)"', html_content, re.DOTALL
+            )
+            if match:
+                audio_src = html.unescape(match.group(1))
 
             return AudioInfo(
                 program_name=program_name,
@@ -88,27 +75,43 @@ class AudeeInfoExtractor(AudioInfoExtractorBase):
 class BitfanInfoExtractor(AudioInfoExtractorBase):
     """bitfan.netの音声情報抽出クラス"""
 
-    def get_audio_info(self, soup) -> AudioInfo | None:
+    def get_audio_info(self, html_content: str) -> AudioInfo | None:
         self.logger.info("bitfan.netのメタデータと音声URLを解析します...")
         try:
-            program_name = soup.select_one("meta[property='og:site_name']")["content"]
-            episode_title = soup.select_one("h1.p-clubArticle__name").get_text(strip=True)
-            artist_name = program_name
-            cover_image_url = soup.select_one("div.p-clubArticle__thumb img")["src"]
+            soup = BeautifulSoup(html_content, "html.parser")
 
-            audio_tag = soup.select_one("audio")
+            # bs4ではiframe内の解析ができないので普通の正規表現を使用
             audio_src = None
-            if audio_tag:
-                if audio_tag.has_attr("src"):
-                    audio_src = audio_tag["src"]
-                else:
-                    source_tag = audio_tag.select_one("source")
-                    if source_tag and source_tag.has_attr("src"):
-                        audio_src = source_tag["src"]
+            match = re.search(
+                r'<audio.*?<source src="([^"]+)"', html_content, re.DOTALL
+            )
+            if match:
+                audio_src = html.unescape(match.group(1))
 
             if not audio_src:
-                self.logger.error("audioタグまたはsourceタグが見つかりませんでした。")
+                self.logger.error("正規表現で音声URLが見つかりませんでした。")
                 return None
+
+            program_name = soup.select_one("meta[property='og:site_name']")["content"]
+            episode_title = soup.select_one("h1.p-clubArticle__name").get_text(
+                strip=True
+            )
+            artist_name_element = soup.select_one(
+                "div.p-clubArticle__content div.c-clubWysiwyg p"
+            )
+            artist_name = program_name  # デフォルト値
+            if artist_name_element:
+                artist_text = artist_name_element.get_text(strip=True)
+                if "パーソナリティ：" in artist_text:
+                    # 「パーソナリティ：」以降のテキストを取得し、最初の「　」または「（」までを抽出
+                    artist_name_raw = (
+                        artist_text.split("パーソナリティ：", 1)[1]
+                        .split(" ", 1)[0]
+                        .split("（", 1)[0]
+                        .strip()
+                    )
+                    artist_name = artist_name_raw
+            cover_image_url = soup.select_one("div.p-clubArticle__thumb img")["src"]
 
             return AudioInfo(
                 program_name=program_name,
@@ -121,11 +124,13 @@ class BitfanInfoExtractor(AudioInfoExtractorBase):
             self.logger.error(f"bitfan.netのHTML解析に失敗しました: {e}", exc_info=True)
             return None
 
+
 # --- ドメインとExtractorのマッピング ---
 EXTRACTOR_MAP = {
     "audee.jp": AudeeInfoExtractor,
     "bitfan.net": BitfanInfoExtractor,
 }
+
 
 def get_extractor(domain, logger):
     """ドメイン名に一致するExtractorのインスタンスを返す"""
