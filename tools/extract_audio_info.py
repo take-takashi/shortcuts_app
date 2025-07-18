@@ -2,8 +2,6 @@ import argparse
 import os
 from unittest.mock import Mock  # ロガーのモック用
 
-from bs4 import BeautifulSoup
-
 from AudioInfoExtractor import get_extractor
 
 
@@ -36,12 +34,10 @@ def main():
         with open(html_path, "r", encoding="utf-8") as f:
             html_content = f.read()
 
-        soup = BeautifulSoup(html_content, "lxml")
-
         extractor = get_extractor(domain, logger)
 
         if extractor:
-            audio_info = extractor.get_audio_info(soup)
+            audio_info = extractor.get_audio_info(html_content)
             if audio_info:
                 print("\n--- 抽出された情報 ---")
                 print(f"番組名: {audio_info.program_name}")
