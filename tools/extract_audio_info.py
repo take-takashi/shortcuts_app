@@ -1,13 +1,14 @@
 import argparse
+import json
+import logging
+import logging.config
 import os
-from unittest.mock import Mock  # ロガーのモック用
 
 from AudioInfoExtractor import get_extractor
 
-
 def main():
     parser = argparse.ArgumentParser(
-        description="指定されたHTMLファイルから音声情報を抽出し、表示します。"
+        description="指定されたHTMLファイルから音声情報を抽出します。"
     )
     parser.add_argument("html_path", help="対象のHTMLファイルのパス")
     parser.add_argument(
@@ -17,11 +18,14 @@ def main():
     )
     args = parser.parse_args()
 
+    # ロギング設定ファイルを読み込む
+    with open(os.path.join(os.path.dirname(__file__), "..", "logging_config.json"), "r") as f:
+        config = json.load(f)
+    logging.config.dictConfig(config)
+    logger = logging.getLogger(__name__)
+
     html_path = args.html_path
     domain = args.domain
-
-    # ダミーロガーを作成
-    logger = Mock()
 
     print(f"HTMLファイル: {html_path}")
     print(f"対象ドメイン: {domain}")
