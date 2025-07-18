@@ -96,21 +96,28 @@ class BitfanInfoExtractor(AudioInfoExtractorBase):
             episode_title = soup.select_one("h1.p-clubArticle__name").get_text(
                 strip=True
             )
-            artist_name_element = soup.select_one(
+            # "パーソナリティ：" を含むpタグを特定する
+            artist_name_elements = soup.select(
                 "div.p-clubArticle__content div.c-clubWysiwyg p"
             )
             artist_name = program_name  # デフォルト値
-            if artist_name_element:
-                artist_text = artist_name_element.get_text(strip=True)
+            for element in artist_name_elements:
+                artist_text = element.get_text(strip=True)
                 if "パーソナリティ：" in artist_text:
-                    # 「パーソナリティ：」以降のテキストを取得し、最初の「　」または「（」までを抽出
-                    artist_name_raw = (
-                        artist_text.split("パーソナリティ：", 1)[1]
-                        .split(" ", 1)[0]
-                        .split("（", 1)[0]
-                        .strip()
-                    )
-                    artist_name = artist_name_raw
+                    # 「パーソナリティ：」以降のテキストを取得
+                    artist_name_raw = artist_text.split("パーソナリティ：", 1)[1].strip()
+                    # 「（」以降に補足情報が含まれる場合があるため、分割して前半部分のみ使用
+                    artist_name_raw = artist_name_raw.split("（", 1)[0].strip()
+                    # 全角スペースや読点「、」、「,」、「/」、「・」、「パートナー：」で分割し、各要素を整形
+                    artists = [
+                        name.strip()
+                        for name in re.split(
+                            r"[\s、,/・]|パートナー：", artist_name_raw
+                        )
+                        if name.strip()
+                    ]
+                    artist_name = ", ".join(artists)
+                    break  # マッチしたらループを抜ける
             cover_image_url = soup.select_one("div.p-clubArticle__thumb img")["src"]
 
             return AudioInfo(
