@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 
 from MyPathHelper.my_path_helper import MyPathHelper
 from MyLoggerHelper.my_logger_helper import MyLoggerHelper
-from AudioInfoExtractor.audio_info_extractor import get_extractor
+from AudioInfoExtractor import get_extractor
 
 
 # --- メイン処理 ---
