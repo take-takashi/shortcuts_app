@@ -24,3 +24,8 @@ test = [
 
 [tool.setuptools]
 packages = ["MyPathHelper", "MyNotionHelper", "MyFfmpegHelper", "MyLoggerHelper"]
+
+[dependency-groups]
+dev = [
+    "pytest==8.4.1",
+]

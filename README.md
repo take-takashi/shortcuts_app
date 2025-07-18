@@ -25,6 +25,13 @@ uv 0.7.12 (dc3fd4647 2025-06-06)
 uv pip sync requirements.txt
 ```
 
+### uvでdevにpytestを入れてみた
+
+```bash
+(.venv) takashi@Mac shortcuts_app % uv add pytest==8.4.1 --dev
+# これで`uv sync`で動く？
+```
+
 ## 新規セットアップ時のコマンド
 
 TODO: requirements.inとrequirements.txtを削除
