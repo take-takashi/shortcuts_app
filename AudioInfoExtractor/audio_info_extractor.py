@@ -1,11 +1,15 @@
 
 import json
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+import json
+from abc import ABC, abstractmethod
 from typing import TypedDict
 
 
 # --- 型定義 ---
-class AudioInfo(TypedDict):
+@dataclass
+class AudioInfo:
     """音声情報のデータ構造を定義する型"""
 
     program_name: str
@@ -26,10 +30,11 @@ class AudioInfoExtractorBase(ABC):
         """HTML(BeautifulSoupオブジェクト)から音声情報を取得する"""
         pass
 
+
 class AudeeInfoExtractor(AudioInfoExtractorBase):
     """audee.jpの音声情報抽出クラス"""
 
-    def get_audio_info(self, soup):
+    def get_audio_info(self, soup) -> AudioInfo | None:
         self.logger.info("audee.jpのメタデータと音声URLを解析します...")
         try:
             program_name = soup.select_one("meta[property='og:site_name']")["content"]
@@ -68,21 +73,22 @@ class AudeeInfoExtractor(AudioInfoExtractorBase):
                 self.logger.error("HTML内のJSON-LDから音声URLが見つかりませんでした。")
                 return None
 
-            return {
-                "program_name": program_name,
-                "episode_title": episode_title,
-                "artist_name": artist_name,
-                "cover_image_url": cover_image_url,
-                "audio_src": audio_src,
-            }
+            return AudioInfo(
+                program_name=program_name,
+                episode_title=episode_title,
+                artist_name=artist_name,
+                cover_image_url=cover_image_url,
+                audio_src=audio_src,
+            )
         except Exception as e:
             self.logger.error(f"audee.jpのHTML解析に失敗しました: {e}", exc_info=True)
             return None
 
+
 class BitfanInfoExtractor(AudioInfoExtractorBase):
     """bitfan.netの音声情報抽出クラス"""
 
-    def get_audio_info(self, soup):
+    def get_audio_info(self, soup) -> AudioInfo | None:
         self.logger.info("bitfan.netのメタデータと音声URLを解析します...")
         try:
             program_name = soup.select_one("meta[property='og:site_name']")["content"]
@@ -104,13 +110,13 @@ class BitfanInfoExtractor(AudioInfoExtractorBase):
                 self.logger.error("audioタグまたはsourceタグが見つかりませんでした。")
                 return None
 
-            return {
-                "program_name": program_name,
-                "episode_title": episode_title,
-                "artist_name": artist_name,
-                "cover_image_url": cover_image_url,
-                "audio_src": audio_src,
-            }
+            return AudioInfo(
+                program_name=program_name,
+                episode_title=episode_title,
+                artist_name=artist_name,
+                cover_image_url=cover_image_url,
+                audio_src=audio_src,
+            )
         except Exception as e:
             self.logger.error(f"bitfan.netのHTML解析に失敗しました: {e}", exc_info=True)
             return None

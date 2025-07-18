@@ -11,6 +11,7 @@ from AudioInfoExtractor.audio_info_extractor import get_extractor
 
 # --- メイン処理 ---
 
+
 def download_audio_from_html(html_path, download_dir, logger, domain):
     """HTMLファイルから音声ファイルをダウンロードし、メタデータを付与する"""
     logger.info(f"ドメイン: {domain}")
@@ -36,15 +37,15 @@ def download_audio_from_html(html_path, download_dir, logger, domain):
             return
 
         # --- ダウンロードとffmpeg処理 ---
-        sanitized_program = MyPathHelper.sanitize_filepath(audio_info["program_name"])
-        sanitized_episode = MyPathHelper.sanitize_filepath(audio_info["episode_title"])
+        sanitized_program = MyPathHelper.sanitize_filepath(audio_info.program_name)
+        sanitized_episode = MyPathHelper.sanitize_filepath(audio_info.episode_title)
         temp_filename = "temp_audio.mp3"
         final_filename = f"{sanitized_program}_{sanitized_episode}.mp3"
         temp_filepath = os.path.join(download_dir, temp_filename)
         final_filepath = os.path.join(download_dir, final_filename)
 
         logger.info(f"音声ファイルを一時ファイルとしてダウンロードしています: {temp_filepath}")
-        response = requests.get(audio_info["audio_src"], stream=True)
+        response = requests.get(audio_info.audio_src, stream=True)
         response.raise_for_status()
         with open(temp_filepath, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
@@ -52,10 +53,10 @@ def download_audio_from_html(html_path, download_dir, logger, domain):
         logger.info("ダウンロードが完了しました。")
 
         # --- ffmpeg処理 ---
-        if audio_info["cover_image_url"]:
+        if audio_info.cover_image_url:
             temp_cover_path = os.path.join(download_dir, "temp_cover.jpg")
             logger.info(f"カバー画像をダウンロードしています: {temp_cover_path}")
-            cover_res = requests.get(audio_info["cover_image_url"])
+            cover_res = requests.get(audio_info.cover_image_url)
             with open(temp_cover_path, "wb") as f:
                 f.write(cover_res.content)
 
@@ -67,9 +68,9 @@ def download_audio_from_html(html_path, download_dir, logger, domain):
                 "-map", "0",
                 "-map", "1",
                 "-c", "copy",
-                "-metadata", f"title={audio_info['episode_title']}",
-                "-metadata", f"artist={audio_info['artist_name']}",
-                "-metadata", f"album={audio_info['program_name']}",
+                "-metadata", f"title={audio_info.episode_title}",
+                "-metadata", f"artist={audio_info.artist_name}",
+                "-metadata", f"album={audio_info.program_name}",
                 "-y", final_filepath,
             ]
             subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
@@ -80,9 +81,9 @@ def download_audio_from_html(html_path, download_dir, logger, domain):
                 "ffmpeg",
                 "-i", temp_filepath,
                 "-c", "copy",
-                "-metadata", f"title={audio_info['episode_title']}",
-                "-metadata", f"artist={audio_info['artist_name']}",
-                "-metadata", f"album={audio_info['program_name']}",
+                "-metadata", f"title={audio_info.episode_title}",
+                "-metadata", f"artist={audio_info.artist_name}",
+                "-metadata", f"album={audio_info.program_name}",
                 "-y", final_filepath,
             ]
             subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
@@ -92,6 +93,7 @@ def download_audio_from_html(html_path, download_dir, logger, domain):
 
     except Exception as e:
         logger.error(f"予期せぬエラーが発生しました: {e}", exc_info=True)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -121,6 +123,4 @@ if __name__ == "__main__":
     if not os.path.exists(download_directory):
         os.makedirs(download_directory)
 
-    download_audio_from_html(
-        args.html_path, download_directory, logger, args.domain
-    )
+    download_audio_from_html(args.html_path, download_directory, logger, args.domain)
