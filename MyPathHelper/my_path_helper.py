@@ -53,18 +53,23 @@ class MyPathHelper:
         return p
 
     @staticmethod
-    def sanitize_filepath(name: str) -> str:
+    def sanitize_filepath(path: str) -> str:
         """
-        ファイル名を無害化し、スペースをアンダースコアに置換します。
+        ファイルパスのファイル名部分のみを無害化し、スペースをアンダースコアに置換します。
 
         Args:
-            name (str): 無害化するファイル名。
+            path (str): 無害化するファイルパス。
 
         Returns:
-            str: 無害化されたファイル名。
+            str: ファイル名部分が無害化されたファイルパス。
         """
-        # 安全なファイル名に変更
-        safe_name = sanitize_filename(name)
+        # パスからディレクトリ名とファイル名を取得
+        directory, filename = os.path.split(path)
+
+        # ファイル名を無害化
+        safe_filename = sanitize_filename(filename)
         # スペース1つ以上をアンダースコアに置換
-        safe_name = re.sub(r"\s+", "_", safe_name)
-        return safe_name
+        safe_filename = re.sub(r"\s+", "_", safe_filename)
+
+        # ディレクトリ名と無害化されたファイル名を結合して返す
+        return os.path.join(directory, safe_filename)
