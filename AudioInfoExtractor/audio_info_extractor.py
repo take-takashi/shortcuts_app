@@ -54,11 +54,15 @@ class AudeeInfoExtractor(AudioInfoExtractorBase):
             cover_image_url = soup.select_one("meta[property='og:image']")["content"]
 
             audio_src = None
-            match = re.search(
-                r'<audio.*?<source src="([^"]+)"', html_content, re.DOTALL
-            )
+            # <script>タグ内のplaylist変数を正規表現で検索
+            match = re.search(r"var playlist =\s*(\[.*?]);", html_content, re.DOTALL)
             if match:
-                audio_src = html.unescape(match.group(1))
+                playlist_str = match.group(1)
+                # playlistから音声URLを抽出
+                # 簡単な文字列処理で対応するが、より複雑な場合はjsonライブラリなどが必要
+                url_match = re.search(r'\"voice\":\s*\"(.*?)\"', playlist_str)
+                if url_match:
+                    audio_src = url_match.group(1)
 
             return AudioInfo(
                 program_name=program_name,
