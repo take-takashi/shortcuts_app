@@ -1,8 +1,6 @@
 import os
 import re
 
-from pathvalidate import sanitize_filename
-
 
 class MyPathHelper:
     """ファイルパス操作に関するヘルパークラス。"""
@@ -55,7 +53,10 @@ class MyPathHelper:
     @staticmethod
     def sanitize_filepath(path: str) -> str:
         """
-        ファイルパスのファイル名部分のみを無害化し、スペースをアンダースコアに置換します。
+        ファイルパスのファイル名部分を無害化します。
+
+        - 使用できない文字を全角に置換
+        - スペースをアンダースコアに置換
 
         Args:
             path (str): 無害化するファイルパス。
@@ -65,11 +66,28 @@ class MyPathHelper:
         """
         # パスからディレクトリ名とファイル名を取得
         directory, filename = os.path.split(path)
+        print("dir = ", directory)
+        print("filename = ", filename)
 
-        # ファイル名を無害化
-        safe_filename = sanitize_filename(filename)
+        # ファイル名に使用できない文字を全角に置換するための変換テーブルを作成
+        translation_table = str.maketrans(
+            {
+                "<": "＜",
+                ">": "＞",
+                ":": "：",
+                '"': "”",
+                "/": "／",
+                "\\": "＼",
+                "|": "｜",
+                "?": "？",
+                "*": "＊",
+            }
+        )
+        filename = filename.translate(translation_table)
+
         # スペース1つ以上をアンダースコアに置換
-        safe_filename = re.sub(r"\s+", "_", safe_filename)
+        filename = re.sub(r"\s+", "_", filename)
+        print("sani = ", filename)
 
         # ディレクトリ名と無害化されたファイル名を結合して返す
-        return os.path.join(directory, safe_filename)
+        return os.path.join(directory, filename)
