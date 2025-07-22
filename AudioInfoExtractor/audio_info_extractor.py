@@ -36,6 +36,12 @@ class AudeeInfoExtractor(AudioInfoExtractorBase):
     def get_audio_info(self, html_content: str) -> AudioInfo | None:
         self.logger.info("audee.jpのメタデータと音声URLを解析します...")
         try:
+            program_name = ""
+            episode_title = ""
+            artist_name = ""
+            cover_image_url = ""
+            audio_src = ""
+
             soup = BeautifulSoup(html_content, "html.parser")
 
             # 番組名を取得
@@ -92,29 +98,39 @@ class BitfanInfoExtractor(AudioInfoExtractorBase):
     def get_audio_info(self, html_content: str) -> AudioInfo | None:
         self.logger.info("bitfan.netのメタデータと音声URLを解析します...")
         try:
+            program_name = ""
+            episode_title = ""
+            artist_name = ""
+            cover_image_url = ""
+            audio_src = ""
+
             soup = BeautifulSoup(html_content, "html.parser")
 
-            # bs4ではiframe内の解析ができないので普通の正規表現を使用
-            audio_src = None
+            # 音声URLを取得 (bs4では無理だったので正規表現で取得)
             match = re.search(
                 r'<audio.*?<source src="([^"]+)"', html_content, re.DOTALL
             )
             if match:
                 audio_src = html.unescape(match.group(1))
 
-            if not audio_src:
-                self.logger.error("正規表現で音声URLが見つかりませんでした。")
-                return None
+            # 番組名を取得
+            program_elem = soup.select_one("meta[property='og:site_name']")
+            if program_elem and program_elem.has_attr("content"):
+                program_name = str(program_elem["content"])
 
-            program_name = soup.select_one("meta[property='og:site_name']")["content"]
-            episode_title = soup.select_one("h1.p-clubArticle__name").get_text(
-                strip=True
-            )
-            # "パーソナリティ：" を含むpタグを特定する
+            # エピソードタイトルを取得
+            episode_elem = soup.select_one("h1.p-clubArticle__name")
+            if episode_elem:
+                episode_title = episode_elem.get_text(strip=True)
+
+            # パーソナリティ名を取得
+            # デフォルト値として番組名を設定 (番組名が取得できている場合)
+            if program_name:
+                artist_name = program_name
+
             artist_name_elements = soup.select(
                 "div.p-clubArticle__content div.c-clubWysiwyg p"
             )
-            artist_name = program_name  # デフォルト値
             for element in artist_name_elements:
                 artist_text = element.get_text(strip=True)
                 if "パーソナリティ：" in artist_text:
@@ -124,7 +140,7 @@ class BitfanInfoExtractor(AudioInfoExtractorBase):
                     ].strip()
                     # 「（」以降に補足情報が含まれる場合があるため、分割して前半部分のみ使用
                     artist_name_raw = artist_name_raw.split("（", 1)[0].strip()
-                    # 全角スペースや読点「、」、「,」、「/」、「・」、「パートナー：」で分割し、各要素を整形
+                    # 全角スペースや読点などで分割し、各要素を整形
                     artists = [
                         name.strip()
                         for name in re.split(
@@ -132,9 +148,14 @@ class BitfanInfoExtractor(AudioInfoExtractorBase):
                         )
                         if name.strip()
                     ]
-                    artist_name = ", ".join(artists)
+                    if artists:
+                        artist_name = ", ".join(artists)
                     break  # マッチしたらループを抜ける
-            cover_image_url = soup.select_one("div.p-clubArticle__thumb img")["src"]
+
+            # カバー画像URLを取得
+            cover_image_elem = soup.select_one("div.p-clubArticle__thumb img")
+            if cover_image_elem and cover_image_elem.has_attr("src"):
+                cover_image_url = str(cover_image_elem["src"])
 
             return AudioInfo(
                 program_name=program_name,
