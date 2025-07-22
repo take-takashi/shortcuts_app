@@ -37,12 +37,18 @@ class AudeeInfoExtractor(AudioInfoExtractorBase):
         self.logger.info("audee.jpのメタデータと音声URLを解析します...")
         try:
             soup = BeautifulSoup(html_content, "html.parser")
-            program_name = soup.select_one(
-                "h2.box-program-ttl.ttl-cmn-lev1 a"
-            ).get_text(strip=True)
-            episode_title_full = soup.select_one("div.ttl-inner").get_text(strip=True)
-            # 日付部分を除去してエピソードタイトルを抽出
-            episode_title = episode_title_full.split(")", 1)[-1].strip()
+
+            # 番組名を取得
+            program_elem = soup.select_one("h2.box-program-ttl.ttl-cmn-lev1 a")
+            if program_elem:
+                program_name = program_elem.get_text(strip=True)
+
+            # エピソードタイトルを取得
+            epsode_elem = soup.select_one("div.ttl-inner")
+            if epsode_elem:
+                episode_title_full = epsode_elem.get_text(strip=True)
+                # 日付部分を除去してエピソードタイトルを抽出
+                episode_title = episode_title_full.split(")", 1)[-1].strip()
 
             # パーソナリティ名を番組名から抽出
             # 例: 「伊藤沙莉のsaireek channel」から「伊藤沙莉」を抽出
@@ -51,8 +57,12 @@ class AudeeInfoExtractor(AudioInfoExtractorBase):
             else:
                 artist_name = program_name  # 「の」がない場合は番組名をそのまま使用
 
-            cover_image_url = soup.select_one("meta[property='og:image']")["content"]
+            # フロントカバー画像URLを取得
+            cover_image_elem = soup.select_one("meta[property='og:image']")
+            if cover_image_elem:
+                cover_image_url = str(cover_image_elem["content"])
 
+            # 音声URLを取得
             audio_src = None
             # <script>タグ内のplaylist変数を正規表現で検索
             match = re.search(r"var playlist =\s*(\[.*?]);", html_content, re.DOTALL)
@@ -60,7 +70,7 @@ class AudeeInfoExtractor(AudioInfoExtractorBase):
                 playlist_str = match.group(1)
                 # playlistから音声URLを抽出
                 # 簡単な文字列処理で対応するが、より複雑な場合はjsonライブラリなどが必要
-                url_match = re.search(r'\"voice\":\s*\"(.*?)\"', playlist_str)
+                url_match = re.search(r"\"voice\":\s*\"(.*?)\"", playlist_str)
                 if url_match:
                     audio_src = url_match.group(1)
 
@@ -68,8 +78,8 @@ class AudeeInfoExtractor(AudioInfoExtractorBase):
                 program_name=program_name,
                 episode_title=episode_title,
                 artist_name=artist_name,
-                cover_image_url=cover_image_url,
-                audio_src=audio_src,
+                cover_image_url=cover_image_url or "",
+                audio_src=audio_src or "",
             )
         except Exception as e:
             self.logger.error(f"audee.jpのHTML解析に失敗しました: {e}", exc_info=True)
@@ -109,7 +119,9 @@ class BitfanInfoExtractor(AudioInfoExtractorBase):
                 artist_text = element.get_text(strip=True)
                 if "パーソナリティ：" in artist_text:
                     # 「パーソナリティ：」以降のテキストを取得
-                    artist_name_raw = artist_text.split("パーソナリティ：", 1)[1].strip()
+                    artist_name_raw = artist_text.split("パーソナリティ：", 1)[
+                        1
+                    ].strip()
                     # 「（」以降に補足情報が含まれる場合があるため、分割して前半部分のみ使用
                     artist_name_raw = artist_name_raw.split("（", 1)[0].strip()
                     # 全角スペースや読点「、」、「,」、「/」、「・」、「パートナー：」で分割し、各要素を整形
