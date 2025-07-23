@@ -25,7 +25,7 @@ class AudioInfoExtractorBase(ABC):
         self.logger = logger
 
     @abstractmethod
-    def get_audio_info(self, html_content: str) -> AudioInfo | None:
+    def get_audio_info(self, html_content: str) -> list[AudioInfo] | None:
         """HTML文字列から音声情報を取得する"""
         pass
 
@@ -33,7 +33,7 @@ class AudioInfoExtractorBase(ABC):
 class AudeeInfoExtractor(AudioInfoExtractorBase):
     """audee.jpの音声情報抽出クラス"""
 
-    def get_audio_info(self, html_content: str) -> AudioInfo | None:
+    def get_audio_info(self, html_content: str) -> list[AudioInfo] | None:
         self.logger.info("audee.jpのメタデータと音声URLを解析します...")
         try:
             program_name = ""
@@ -80,13 +80,19 @@ class AudeeInfoExtractor(AudioInfoExtractorBase):
                 if url_match:
                     audio_src = url_match.group(1)
 
-            return AudioInfo(
-                program_name=program_name,
-                episode_title=episode_title,
-                artist_name=artist_name,
-                cover_image_url=cover_image_url or "",
-                audio_src=audio_src or "",
-            )
+            if not audio_src:
+                self.logger.warning("音声URLが見つかりませんでした。")
+                return None
+
+            return [
+                AudioInfo(
+                    program_name=program_name,
+                    episode_title=episode_title,
+                    artist_name=artist_name,
+                    cover_image_url=cover_image_url or "",
+                    audio_src=audio_src or "",
+                )
+            ]
         except Exception as e:
             self.logger.error(f"audee.jpのHTML解析に失敗しました: {e}", exc_info=True)
             return None
@@ -95,7 +101,7 @@ class AudeeInfoExtractor(AudioInfoExtractorBase):
 class BitfanInfoExtractor(AudioInfoExtractorBase):
     """bitfan.netの音声情報抽出クラス"""
 
-    def get_audio_info(self, html_content: str) -> AudioInfo | None:
+    def get_audio_info(self, html_content: str) -> list[AudioInfo] | None:
         self.logger.info("bitfan.netのメタデータと音声URLを解析します...")
         try:
             program_name = ""
@@ -157,13 +163,19 @@ class BitfanInfoExtractor(AudioInfoExtractorBase):
             if cover_image_elem and cover_image_elem.has_attr("src"):
                 cover_image_url = str(cover_image_elem["src"])
 
-            return AudioInfo(
-                program_name=program_name,
-                episode_title=episode_title,
-                artist_name=artist_name,
-                cover_image_url=cover_image_url,
-                audio_src=audio_src,
-            )
+            if not audio_src:
+                self.logger.warning("音声URLが見つかりませんでした。")
+                return None
+
+            return [
+                AudioInfo(
+                    program_name=program_name,
+                    episode_title=episode_title,
+                    artist_name=artist_name,
+                    cover_image_url=cover_image_url,
+                    audio_src=audio_src,
+                )
+            ]
         except Exception as e:
             self.logger.error(f"bitfan.netのHTML解析に失敗しました: {e}", exc_info=True)
             return None

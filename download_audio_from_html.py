@@ -26,84 +26,85 @@ def download_audio_from_html(html_path, download_dir, logger, domain):
             return
 
         # 音声情報を取得
-        audio_info = extractor.get_audio_info(html_content)
+        audio_info_list = extractor.get_audio_info(html_content)
 
-        if not audio_info:
+        if not audio_info_list:
             logger.error("音声情報の取得に失敗しました。")
             return
 
-        # --- ダウンロードとffmpeg処理 ---
-        # TODO サニタイズ不要
-        sanitized_program = MyPathHelper.sanitize_filepath(audio_info.program_name)
-        sanitized_episode = MyPathHelper.sanitize_filepath(audio_info.episode_title)
-        temp_filename = "temp_audio.mp3"
-        final_filename = f"{sanitized_program}_{sanitized_episode}.mp3"
-        temp_filepath = os.path.join(download_dir, temp_filename)
-        final_filepath = os.path.join(download_dir, final_filename)
+        for audio_info in audio_info_list:
+            # --- ダウンロードとffmpeg処理 ---
+            # TODO サニタイズ不要
+            sanitized_program = MyPathHelper.sanitize_filepath(audio_info.program_name)
+            sanitized_episode = MyPathHelper.sanitize_filepath(audio_info.episode_title)
+            temp_filename = "temp_audio.mp3"
+            final_filename = f"{sanitized_program}_{sanitized_episode}.mp3"
+            temp_filepath = os.path.join(download_dir, temp_filename)
+            final_filepath = os.path.join(download_dir, final_filename)
 
-        logger.info(
-            f"音声ファイルを一時ファイルとしてダウンロードしています: {temp_filepath}"
-        )
-        response = requests.get(audio_info.audio_src, stream=True)
-        response.raise_for_status()
-        with open(temp_filepath, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-        logger.info("ダウンロードが完了しました。")
+            logger.info(
+                f"音声ファイルを一時ファイルとしてダウンロードしています: {temp_filepath}"
+            )
+            response = requests.get(audio_info.audio_src, stream=True)
+            response.raise_for_status()
+            with open(temp_filepath, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            logger.info("ダウンロードが完了しました。")
 
-        # --- ffmpeg処理 ---
-        if audio_info.cover_image_url:
-            temp_cover_path = os.path.join(download_dir, "temp_cover.jpg")
-            logger.info(f"カバー画像をダウンロードしています: {temp_cover_path}")
-            cover_res = requests.get(audio_info.cover_image_url)
-            with open(temp_cover_path, "wb") as f:
-                f.write(cover_res.content)
+            # --- ffmpeg処理 ---
+            if audio_info.cover_image_url:
+                temp_cover_path = os.path.join(download_dir, "temp_cover.jpg")
+                logger.info(f"カバー画像をダウンロードしています: {temp_cover_path}")
+                cover_res = requests.get(audio_info.cover_image_url)
+                with open(temp_cover_path, "wb") as f:
+                    f.write(cover_res.content)
 
-            logger.info("ffmpegを使用してメタデータとカバー画像を埋め込んでいます...")
-            ffmpeg_command = [
-                "ffmpeg",
-                "-i",
-                temp_filepath,
-                "-i",
-                temp_cover_path,
-                "-map",
-                "0",
-                "-map",
-                "1",
-                "-c",
-                "copy",
-                "-metadata",
-                f"title={audio_info.episode_title}",
-                "-metadata",
-                f"artist={audio_info.artist_name}",
-                "-metadata",
-                f"album={audio_info.program_name}",
-                "-y",
-                final_filepath,
-            ]
-            subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
-            os.remove(temp_cover_path)
-        else:
-            logger.info("ffmpegを使用してメタデータを埋め込んでいます...")
-            ffmpeg_command = [
-                "ffmpeg",
-                "-i",
-                temp_filepath,
-                "-c",
-                "copy",
-                "-metadata",
-                f"title={audio_info.episode_title}",
-                "-metadata",
-                f"artist={audio_info.artist_name}",
-                "-metadata",
-                f"album={audio_info.program_name}",
-                "-y",
-                final_filepath,
-            ]
-            subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
+                logger.info("ffmpegを使用してメタデータとカバー画像を埋め込んでいます...")
+                ffmpeg_command = [
+                    "ffmpeg",
+                    "-i",
+                    temp_filepath,
+                    "-i",
+                    temp_cover_path,
+                    "-map",
+                    "0",
+                    "-map",
+                    "1",
+                    "-c",
+                    "copy",
+                    "-metadata",
+                    f"title={audio_info.episode_title}",
+                    "-metadata",
+                    f"artist={audio_info.artist_name}",
+                    "-metadata",
+                    f"album={audio_info.program_name}",
+                    "-y",
+                    final_filepath,
+                ]
+                subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
+                os.remove(temp_cover_path)
+            else:
+                logger.info("ffmpegを使用してメタデータを埋め込んでいます...")
+                ffmpeg_command = [
+                    "ffmpeg",
+                    "-i",
+                    temp_filepath,
+                    "-c",
+                    "copy",
+                    "-metadata",
+                    f"title={audio_info.episode_title}",
+                    "-metadata",
+                    f"artist={audio_info.artist_name}",
+                    "-metadata",
+                    f"album={audio_info.program_name}",
+                    "-y",
+                    final_filepath,
+                ]
+                subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
 
-        os.remove(temp_filepath)
-        logger.info(f"処理が完了し、最終ファイルを保存しました: {final_filepath}")
+            os.remove(temp_filepath)
+            logger.info(f"処理が完了し、最終ファイルを保存しました: {final_filepath}")
 
     except Exception as e:
         logger.error(f"予期せぬエラーが発生しました: {e}", exc_info=True)
