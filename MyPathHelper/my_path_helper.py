@@ -66,8 +66,6 @@ class MyPathHelper:
         """
         # パスからディレクトリ名とファイル名を取得
         directory, filename = os.path.split(path)
-        print("dir = ", directory)
-        print("filename = ", filename)
 
         # ファイル名に使用できない文字を全角に置換するための変換テーブルを作成
         translation_table = str.maketrans(
