@@ -1,13 +1,12 @@
 import argparse
 import os
 import subprocess
+
 import requests
-from bs4 import BeautifulSoup
 
-from MyPathHelper.my_path_helper import MyPathHelper
-from MyLoggerHelper.my_logger_helper import MyLoggerHelper
 from AudioInfoExtractor import get_extractor
-
+from MyLoggerHelper.my_logger_helper import MyLoggerHelper
+from MyPathHelper.my_path_helper import MyPathHelper
 
 # --- メイン処理 ---
 
@@ -20,9 +19,6 @@ def download_audio_from_html(html_path, download_dir, logger, domain):
         with open(html_path, "r", encoding="utf-8") as f:
             html_content = f.read()
 
-        # BeautifulSoupでHTMLを解析
-        soup = BeautifulSoup(html_content, "lxml")
-
         # ドメインに基づいて適切なExtractorを取得
         extractor = get_extractor(domain, logger)
         if not extractor:
@@ -30,13 +26,14 @@ def download_audio_from_html(html_path, download_dir, logger, domain):
             return
 
         # 音声情報を取得
-        audio_info = extractor.get_audio_info(soup)
+        audio_info = extractor.get_audio_info(html_content)
 
         if not audio_info:
             logger.error("音声情報の取得に失敗しました。")
             return
 
         # --- ダウンロードとffmpeg処理 ---
+        # TODO サニタイズ不要
         sanitized_program = MyPathHelper.sanitize_filepath(audio_info.program_name)
         sanitized_episode = MyPathHelper.sanitize_filepath(audio_info.episode_title)
         temp_filename = "temp_audio.mp3"
@@ -44,7 +41,9 @@ def download_audio_from_html(html_path, download_dir, logger, domain):
         temp_filepath = os.path.join(download_dir, temp_filename)
         final_filepath = os.path.join(download_dir, final_filename)
 
-        logger.info(f"音声ファイルを一時ファイルとしてダウンロードしています: {temp_filepath}")
+        logger.info(
+            f"音声ファイルを一時ファイルとしてダウンロードしています: {temp_filepath}"
+        )
         response = requests.get(audio_info.audio_src, stream=True)
         response.raise_for_status()
         with open(temp_filepath, "wb") as f:
@@ -63,15 +62,24 @@ def download_audio_from_html(html_path, download_dir, logger, domain):
             logger.info("ffmpegを使用してメタデータとカバー画像を埋め込んでいます...")
             ffmpeg_command = [
                 "ffmpeg",
-                "-i", temp_filepath,
-                "-i", temp_cover_path,
-                "-map", "0",
-                "-map", "1",
-                "-c", "copy",
-                "-metadata", f"title={audio_info.episode_title}",
-                "-metadata", f"artist={audio_info.artist_name}",
-                "-metadata", f"album={audio_info.program_name}",
-                "-y", final_filepath,
+                "-i",
+                temp_filepath,
+                "-i",
+                temp_cover_path,
+                "-map",
+                "0",
+                "-map",
+                "1",
+                "-c",
+                "copy",
+                "-metadata",
+                f"title={audio_info.episode_title}",
+                "-metadata",
+                f"artist={audio_info.artist_name}",
+                "-metadata",
+                f"album={audio_info.program_name}",
+                "-y",
+                final_filepath,
             ]
             subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
             os.remove(temp_cover_path)
@@ -79,12 +87,18 @@ def download_audio_from_html(html_path, download_dir, logger, domain):
             logger.info("ffmpegを使用してメタデータを埋め込んでいます...")
             ffmpeg_command = [
                 "ffmpeg",
-                "-i", temp_filepath,
-                "-c", "copy",
-                "-metadata", f"title={audio_info.episode_title}",
-                "-metadata", f"artist={audio_info.artist_name}",
-                "-metadata", f"album={audio_info.program_name}",
-                "-y", final_filepath,
+                "-i",
+                temp_filepath,
+                "-c",
+                "copy",
+                "-metadata",
+                f"title={audio_info.episode_title}",
+                "-metadata",
+                f"artist={audio_info.artist_name}",
+                "-metadata",
+                f"album={audio_info.program_name}",
+                "-y",
+                final_filepath,
             ]
             subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
 
