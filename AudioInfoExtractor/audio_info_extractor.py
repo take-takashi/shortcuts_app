@@ -172,7 +172,7 @@ class BitfanInfoExtractor(AudioInfoExtractorBase):
 # --- ドメインとExtractorのマッピング ---
 EXTRACTOR_MAP = {
     "audee.jp": AudeeInfoExtractor,
-    "bitfan.net": BitfanInfoExtractor,
+    "ij-matome.bitfan.id": BitfanInfoExtractor,
 }
 
 
