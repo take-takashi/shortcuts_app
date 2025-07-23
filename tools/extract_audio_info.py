@@ -6,6 +6,7 @@ import os
 
 from AudioInfoExtractor import get_extractor
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="指定されたHTMLファイルから音声情報を抽出します。"
@@ -19,7 +20,9 @@ def main():
     args = parser.parse_args()
 
     # ロギング設定ファイルを読み込む
-    with open(os.path.join(os.path.dirname(__file__), "..", "logging_config.json"), "r") as f:
+    with open(
+        os.path.join(os.path.dirname(__file__), "..", "logging_config.json"), "r"
+    ) as f:
         config = json.load(f)
     logging.config.dictConfig(config)
     logger = logging.getLogger(__name__)
@@ -41,14 +44,16 @@ def main():
         extractor = get_extractor(domain, logger)
 
         if extractor:
-            audio_info = extractor.get_audio_info(html_content)
-            if audio_info:
+            audio_info_list = extractor.get_audio_info(html_content)
+            if audio_info_list:
                 print("\n--- 抽出された情報 ---")
-                print(f"番組名: {audio_info.program_name}")
-                print(f"エピソードタイトル: {audio_info.episode_title}")
-                print(f"パーソナリティ名: {audio_info.artist_name}")
-                print(f"カバー画像URL: {audio_info.cover_image_url}")
-                print(f"音声URL: {audio_info.audio_src}")
+                for i, audio_info in enumerate(audio_info_list):
+                    print(f"\n--- 音声 {i+1} ---")
+                    print(f"  番組名: {audio_info.program_name}")
+                    print(f"  エピソードタイトル: {audio_info.episode_title}")
+                    print(f"  パーソナリティ名: {audio_info.artist_name}")
+                    print(f"  カバー画像URL: {audio_info.cover_image_url}")
+                    print(f"  音声URL: {audio_info.audio_src}")
             else:
                 print("\n音声情報の抽出に失敗しました。")
         else:

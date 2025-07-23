@@ -1,4 +1,5 @@
 import html
+import json
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -36,63 +37,88 @@ class AudeeInfoExtractor(AudioInfoExtractorBase):
     def get_audio_info(self, html_content: str) -> list[AudioInfo] | None:
         self.logger.info("audee.jpのメタデータと音声URLを解析します...")
         try:
-            program_name = ""
-            episode_title = ""
-            artist_name = ""
-            cover_image_url = ""
-            audio_src = ""
-
             soup = BeautifulSoup(html_content, "html.parser")
 
-            # 番組名を取得
-            program_elem = soup.select_one("h2.box-program-ttl.ttl-cmn-lev1 a")
-            if program_elem:
-                program_name = program_elem.get_text(strip=True)
+            # --- 基本情報を取得 ---
+            program_name_elem = soup.select_one("h2.box-program-ttl.ttl-cmn-lev1 a")
+            program_name = (
+                program_name_elem.get_text(strip=True) if program_name_elem else ""
+            )
 
-            # エピソードタイトルを取得
-            epsode_elem = soup.select_one("div.ttl-inner")
-            if epsode_elem:
-                episode_title_full = epsode_elem.get_text(strip=True)
-                # 日付部分を除去してエピソードタイトルを抽出
-                episode_title = episode_title_full.split(")", 1)[-1].strip()
-
-            # パーソナリティ名を番組名から抽出
-            # 例: 「伊藤沙莉のsaireek channel」から「伊藤沙莉」を抽出
+            artist_name = ""
             if "の" in program_name:
                 artist_name = program_name.split("の", 1)[0].strip()
             else:
-                artist_name = program_name  # 「の」がない場合は番組名をそのまま使用
+                artist_name = program_name
 
-            # フロントカバー画像URLを取得
             cover_image_elem = soup.select_one("meta[property='og:image']")
-            if cover_image_elem:
-                cover_image_url = str(cover_image_elem["content"])
+            cover_image_url = (
+                str(cover_image_elem["content"]) if cover_image_elem else ""
+            )
 
-            # 音声URLを取得
-            audio_src = None
-            # <script>タグ内のplaylist変数を正規表現で検索
-            match = re.search(r"var playlist =\s*(\[.*?]);", html_content, re.DOTALL)
-            if match:
-                playlist_str = match.group(1)
-                # playlistから音声URLを抽出
-                # 簡単な文字列処理で対応するが、より複雑な場合はjsonライブラリなどが必要
-                url_match = re.search(r"\"voice\":\s*\"(.*?)\"", playlist_str)
-                if url_match:
-                    audio_src = url_match.group(1)
-
-            if not audio_src:
-                self.logger.warning("音声URLが見つかりませんでした。")
+            # --- ld+jsonから音声情報を取得 ---
+            ld_json_elements = soup.find_all("script", type="application/ld+json")
+            if not ld_json_elements:
+                self.logger.error("ld+jsonが見つかりませんでした。")
                 return None
 
-            return [
-                AudioInfo(
-                    program_name=program_name,
-                    episode_title=episode_title,
-                    artist_name=artist_name,
-                    cover_image_url=cover_image_url or "",
-                    audio_src=audio_src or "",
+            audio_data_list = []
+            for ld_json_elem in ld_json_elements:
+                try:
+                    ld_json_text = ld_json_elem.string
+                    if not ld_json_text:
+                        continue
+                    
+                    data = json.loads(ld_json_text.strip())
+                    
+                    # dataがリストか辞書かで分岐
+                    if isinstance(data, list):
+                        # リストの最初の要素にaudioキーがあるかチェック
+                        if data and "audio" in data[0]:
+                            audio_data_list.extend(data[0]["audio"])
+                    elif isinstance(data, dict):
+                        if "audio" in data:
+                            audios = data["audio"]
+                            if isinstance(audios, list):
+                                audio_data_list.extend(audios)
+                            else:
+                                audio_data_list.append(audios)
+
+                except json.JSONDecodeError:
+                    # パースに失敗した場合は無視して次の要素へ
+                    continue
+
+            if not audio_data_list:
+                self.logger.warning("ld+json内に音声情報が見つかりませんでした。")
+                return None
+
+            # audio_dataが辞書の場合はリストに変換
+            if isinstance(audio_data_list, dict):
+                audio_data_list = [audio_data_list]
+
+            audio_info_list = []
+            for audio_data in audio_data_list:
+                episode_title = audio_data.get("name", "")
+                audio_src = audio_data.get("contentUrl", "")
+
+                if not audio_src:
+                    self.logger.warning(
+                        f"音声URLが見つかりませんでした: {episode_title}"
+                    )
+                    continue
+
+                audio_info_list.append(
+                    AudioInfo(
+                        program_name=program_name,
+                        episode_title=episode_title,
+                        artist_name=artist_name,
+                        cover_image_url=cover_image_url,
+                        audio_src=audio_src,
+                    )
                 )
-            ]
+
+            return audio_info_list if audio_info_list else None
+
         except Exception as e:
             self.logger.error(f"audee.jpのHTML解析に失敗しました: {e}", exc_info=True)
             return None
