@@ -6,6 +6,9 @@ import os
 
 from AudioInfoExtractor import get_extractor
 
+# 実行方法
+# PYTHONPATH=$(pwd) python tools/extract_audio_info.py ./tests/private_data/test_audee_page_2audio.html --domain audee.jp
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -48,7 +51,7 @@ def main():
             if audio_info_list:
                 print("\n--- 抽出された情報 ---")
                 for i, audio_info in enumerate(audio_info_list):
-                    print(f"\n--- 音声 {i+1} ---")
+                    print(f"\n--- 音声 {i + 1} ---")
                     print(f"  番組名: {audio_info.program_name}")
                     print(f"  エピソードタイトル: {audio_info.episode_title}")
                     print(f"  パーソナリティ名: {audio_info.artist_name}")

@@ -62,15 +62,16 @@ class AudeeInfoExtractor(AudioInfoExtractorBase):
                 self.logger.error("ld+jsonが見つかりませんでした。")
                 return None
 
+            # パートに分かれて音声が存在する場合に備えてリストを用意
             audio_data_list = []
             for ld_json_elem in ld_json_elements:
                 try:
-                    ld_json_text = ld_json_elem.string
+                    ld_json_text = ld_json_elem.get_text()
                     if not ld_json_text:
                         continue
-                    
+
                     data = json.loads(ld_json_text.strip())
-                    
+
                     # dataがリストか辞書かで分岐
                     if isinstance(data, list):
                         # リストの最初の要素にaudioキーがあるかチェック

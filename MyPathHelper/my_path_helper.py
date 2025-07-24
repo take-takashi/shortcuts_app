@@ -16,9 +16,13 @@ class MyPathHelper:
         Returns:
             str: 安全で完全な絶対パス。
         """
-        p = MyPathHelper.replace_safe_path(path)
-        p = MyPathHelper.sanitize_filepath(p)
-        return p
+
+        # DirとFilenameに分離する
+        directory, filename = os.path.split(path)
+
+        directory = MyPathHelper.replace_safe_path(directory)
+        filename = MyPathHelper.sanitize_filepath(filename)
+        return os.path.join(directory, filename)
 
     @staticmethod
     def replace_safe_path(path: str) -> str:
@@ -51,21 +55,19 @@ class MyPathHelper:
         return p
 
     @staticmethod
-    def sanitize_filepath(path: str) -> str:
+    def sanitize_filepath(filename: str) -> str:
         """
-        ファイルパスのファイル名部分を無害化します。
+        ファイル名を無害化します。
 
         - 使用できない文字を全角に置換
         - スペースをアンダースコアに置換
 
         Args:
-            path (str): 無害化するファイルパス。
+            path (str): 無害化するファイル名。
 
         Returns:
-            str: ファイル名部分が無害化されたファイルパス。
+            str: ファイル名部分が無害化されたファイル名。
         """
-        # パスからディレクトリ名とファイル名を取得
-        directory, filename = os.path.split(path)
 
         # ファイル名に使用できない文字を全角に置換するための変換テーブルを作成
         translation_table = str.maketrans(
@@ -81,11 +83,10 @@ class MyPathHelper:
                 "*": "＊",
             }
         )
+        # ファイル名に使用できない文字を全置換
         filename = filename.translate(translation_table)
 
         # スペース1つ以上をアンダースコアに置換
         filename = re.sub(r"\s+", "_", filename)
-        print("sani = ", filename)
 
-        # ディレクトリ名と無害化されたファイル名を結合して返す
-        return os.path.join(directory, filename)
+        return filename

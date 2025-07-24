@@ -60,7 +60,9 @@ def download_audio_from_html(html_path, download_dir, logger, domain):
                 with open(temp_cover_path, "wb") as f:
                     f.write(cover_res.content)
 
-                logger.info("ffmpegを使用してメタデータとカバー画像を埋め込んでいます...")
+                logger.info(
+                    "ffmpegを使用してメタデータとカバー画像を埋め込んでいます..."
+                )
                 ffmpeg_command = [
                     "ffmpeg",
                     "-i",
@@ -82,7 +84,9 @@ def download_audio_from_html(html_path, download_dir, logger, domain):
                     "-y",
                     final_filepath,
                 ]
-                subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
+                subprocess.run(
+                    ffmpeg_command, check=True, capture_output=True, text=True
+                )
                 os.remove(temp_cover_path)
             else:
                 logger.info("ffmpegを使用してメタデータを埋め込んでいます...")
@@ -101,7 +105,9 @@ def download_audio_from_html(html_path, download_dir, logger, domain):
                     "-y",
                     final_filepath,
                 ]
-                subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
+                subprocess.run(
+                    ffmpeg_command, check=True, capture_output=True, text=True
+                )
 
             os.remove(temp_filepath)
             logger.info(f"処理が完了し、最終ファイルを保存しました: {final_filepath}")

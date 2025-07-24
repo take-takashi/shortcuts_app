@@ -74,16 +74,6 @@ def test_sanitize_filepath():
     assert MyPathHelper.complete_safe_path(path) == expected_path
 
 
-def test_sanitize_filepath_only_filename():
-    """ファイル名のみが無害化され、ディレクトリ名は影響を受けないことを確認する。"""
-    path = os.path.join("/path with spaces", "to", "directory", "file:name.txt")
-    expected_filename = "file：name.txt"
-    sanitized_path = MyPathHelper.sanitize_filepath(path)
-    directory, filename = os.path.split(sanitized_path)
-    assert filename == expected_filename
-    assert directory == os.path.join("/path with spaces", "to", "directory")
-
-
 #
 # complete_safe_path のテスト
 #
