@@ -16,3 +16,11 @@ description = "audio_info_extractorのチェック用（bitfan）"
 run = '''
 python -m tools.extract_audio_info tests/private_data/test_bitfan_page.html --domain bitfan.net
 '''
+
+[tasks.tools-extract_audio_info]
+usage = '''
+arg "htmlfile" help="htmlファイルを指定"
+flag "--domain <domain>" help="ドメインを指定"
+'''
+alias = "teai"
+run = "python tools/extract_audio_info.py ${usage_htmlfile} ${usage_domain}"
