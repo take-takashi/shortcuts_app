@@ -49,7 +49,13 @@ def download_file(url: str, output_dir: str = "~/Downloads") -> VideoInfo:
 
     try:
         with YoutubeDL(ydl_opts) as ydl:
+            # 動画のダウンロード
             info = ydl.extract_info(url, download=True)
+
+            # 動画のダウンロードに失敗した場合
+            if info is None:
+                raise Exception("動画のダウンロードに失敗しました。")
+
             video_title = info.get("title")
             video_filepath = ydl.prepare_filename(info)
 
@@ -61,9 +67,9 @@ def download_file(url: str, output_dir: str = "~/Downloads") -> VideoInfo:
                     break
 
             return VideoInfo(
-                video_title=video_title,
-                video_filepath=video_filepath,
-                thumbnail_filepath=thumbnail_filepath,
+                video_title=video_title or "",
+                video_filepath=video_filepath or "",
+                thumbnail_filepath=thumbnail_filepath or "",
             )
 
     except Exception as e:
@@ -92,6 +98,9 @@ def main():
     try:
         logger.info("===== スクリプトを開始します。")
 
+        if NOTION_TOKEN is None or NOTION_DATABASE_ID is None:
+            raise Exception("環境変数が設定されていません。")
+
         # Notionクライアントのインスタンスを作成
         notion = MyNotionHelper(
             token=NOTION_TOKEN,
@@ -109,9 +118,9 @@ def main():
         for item in items:
             # アイテムのプロパティからURLを取得
             logger.info(f"▶ アイテムID「{item['id']}」の処理を開始します。")
-            url = notion.get_item_propertie_url(item)
+            url = notion.get_item_property_url(item)
 
-            if url is None:
+            if url == "":
                 logger.warning(
                     f"⚠️ アイテム {item['id']} に「URL」プロパティがありません。"
                 )
@@ -204,5 +213,6 @@ def main():
 # End
 
 # ======== Main End ===========================================================
-main()
-exit(0)
+if __name__ == "__main__":
+    main()
+    exit(0)

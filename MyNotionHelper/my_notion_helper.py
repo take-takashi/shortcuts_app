@@ -1,16 +1,14 @@
 import concurrent.futures
 import json
 import logging
-import logging.config
 import os
 import time
 from dataclasses import dataclass
 
 import requests
 from notion_client import Client
+
 from MyFfmpegHelper import MyFfmpegHelper
-
-
 
 
 @dataclass
@@ -48,11 +46,12 @@ class MyNotionHelper:
     # Notionデータベースからアイテムを取得する関数
     def get_items(self, database_id) -> list:
         try:
-            response = self.notion.databases.query(
+            response: dict = self.notion.databases.query(  # type: ignore
                 database_id=database_id,
                 # プロパティ「処理済」が未チェックのアイテムを取得
                 filter={"property": "処理済", "checkbox": {"equals": False}},
             )
+
             return response.get("results", [])
 
         # 何かしらのエラーが発生した場合は空のリストを返す
@@ -74,16 +73,16 @@ class MyNotionHelper:
             Exception: ページの作成に失敗した場合に発生します。
         """
         try:
-            response = self.notion.pages.create(
+            response: dict = self.notion.pages.create(
                 parent={"database_id": database_id},
-            )
+            )  # type: ignore
 
             # 200OK以外はエラーを投げる
             if response.get("object") != "page":
                 raise Exception("Failed to create page: Not a page object")
 
             # 作成したpage_idを返す
-            return response.get("id")
+            return response.get("id") or ""
         except Exception as e:
             raise Exception(f"Failed to create page: {e}")
 
@@ -103,7 +102,13 @@ class MyNotionHelper:
 
         try:
             # 1. ページ内の子ブロックを取得
-            children = self.notion.blocks.children.list(block_id=page_id)["results"]
+            blocks: dict = self.notion.blocks.children.list(block_id=page_id)  # type: ignore
+
+            # ブロック群が取得できなかったときは失敗
+            if blocks is None:
+                return False
+
+            children = blocks["results"]
 
             # 2. 各ブロックを削除
             for block in children:
@@ -118,13 +123,27 @@ class MyNotionHelper:
             )
 
     # アイテムのプロパティからURLを取得する関数
-    def get_item_propertie_url(self, item) -> str:
+    def get_item_property_url(self, item) -> str:
+        """
+        Notionアイテムのプロパティから「URL」フィールドの値を取得します。
+
+        引数:
+            item (dict): Notion APIから取得した1件のデータベースアイテム。
+
+        戻り値:
+            str: アイテムの「URL」プロパティに設定されたURL文字列。
+                 プロパティが存在しない場合や未設定の場合は空文字列を返します。
+
+        例外:
+            Exception: プロパティの取得に失敗した場合（フォーマット不整合など）。
+        """
+
         # アイテムのプロパティからURLを取得
         try:
             if "URL" in item["properties"]:
                 return item["properties"]["URL"]["url"]
             else:
-                return None
+                return ""
         except Exception as e:
             raise Exception(f"アイテムのプロパティからURLを取得できませんでした: {e}")
 
@@ -382,6 +401,49 @@ class MyNotionHelper:
                     f"Failed to attach file to page with status code {add_response.status_code}: {add_response.text}"
                 )
 
+            # ページのプロパティにファイルプロパティが存在すれば、アップロードしたファイルをそこにも添付する
+            try:
+                # ページの詳細情報を取得してファイルプロパティ名を検索
+                page_info: dict = self.notion.pages.retrieve(page_id=page_id)  # type: ignore
+                file_property_name = None
+                for prop_name, prop in page_info.get("properties", {}).items():
+                    # Notion APIでは Files & Media プロパティの type は "files"
+                    if isinstance(prop, dict) and prop.get("type") == "files":
+                        file_property_name = prop_name
+                        break
+
+                # ファイルプロパティがあれば、そのプロパティにもファイルを添付する
+                if file_property_name:
+                    # 既存のファイルリストを取得（存在しない場合は空のリスト）
+                    existing_files = []
+                    prop = page_info["properties"].get(file_property_name, {})
+                    if isinstance(prop, dict) and "files" in prop:
+                        existing_files = prop["files"]
+
+                    # 今回アップロードしたファイルのエントリを作成
+                    new_file_entry = {
+                        "type": "file_upload",
+                        "name": file_name,
+                        "file_upload": {"id": file_upload_id},
+                    }
+
+                    # 既存のファイルに新しいファイルを追加
+                    updated_file_list = existing_files + [new_file_entry]
+
+                    # プロパティを更新
+                    update_properties = {
+                        file_property_name: {"files": updated_file_list}
+                    }
+
+                    # Notion クライアントを使ってプロパティを更新
+                    self.notion.pages.update(
+                        page_id=page_id, properties=update_properties
+                    )
+
+            except Exception as e:
+                # プロパティへの添付に失敗した場合はログに記録しますが、ページへの添付は成功しているため処理を続行
+                self.logger.warning(f"Failed to attach file to property: {e}")
+
         except Exception as e:
             raise Exception(f"Notionへのアップロードに失敗しました: {e}")
 
@@ -412,14 +474,15 @@ class MyNotionHelper:
         # ファイルサイズが5GiBを超えていたらファイルを分割する
         if os.path.getsize(file_path) > 5 * 1024 * 1024 * 1024:
             split_size = (5 * 1024**3) - (1024**2 * 100)  # 5GiBとマージン
-            files = MyFfmpegHelper.split_video_lossless_by_keyframes(file_path, split_size_bytes=split_size)
+            files = MyFfmpegHelper.split_video_lossless_by_keyframes(
+                file_path, split_size_bytes=split_size
+            )
         else:
             files.append(file_path)
 
         # files分、ファイルをアップロードする
         for file in files:
             self.upload_file(page_id, file)
-
 
     # ファイルパスを渡して拡張子からMIMEタイプを返す関数
     def get_mime_type_from_extension(self, file_path: str) -> MimeTypeInfo:

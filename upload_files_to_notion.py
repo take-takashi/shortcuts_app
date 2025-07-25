@@ -24,6 +24,9 @@ def main():
     try:
         logger.info("===== スクリプトを開始します。")
 
+        if NOTION_TOKEN is None or NOTION_DATABASE_ID is None:
+            raise Exception("環境変数が設定されていません。")
+
         # コマンドライン引数を取得
         args = sys.argv[1:]
         logger.info(f"Arguments: {args}")
