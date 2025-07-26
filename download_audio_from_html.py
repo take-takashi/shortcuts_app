@@ -11,9 +11,12 @@ from MyPathHelper.my_path_helper import MyPathHelper
 # --- メイン処理 ---
 
 
-def download_audio_from_html(html_path, download_dir, logger, domain):
+def download_audio_from_html(html_path, domain, download_dir, *, logger):
     """HTMLファイルから音声ファイルをダウンロードし、メタデータを付与する"""
+    logger.info(f"HTMLファイルのパス: {html_path}")
     logger.info(f"ドメイン: {domain}")
+    logger.info(f"ダウンロード先ディレクトリ: {download_dir}")
+
     try:
         logger.info(f"ローカルHTMLファイルを読み込んでいます: {html_path}")
         with open(html_path, "r", encoding="utf-8") as f:
@@ -34,7 +37,6 @@ def download_audio_from_html(html_path, download_dir, logger, domain):
 
         for audio_info in audio_info_list:
             # --- ダウンロードとffmpeg処理 ---
-            # TODO サニタイズ不要
             sanitized_program = MyPathHelper.sanitize_filepath(audio_info.program_name)
             sanitized_episode = MyPathHelper.sanitize_filepath(audio_info.episode_title)
             temp_filename = "temp_audio.mp3"
@@ -120,28 +122,33 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="指定されたHTMLファイルから音声ファイルをダウンロードし、メタデータを付与します。"
     )
-    parser.add_argument("html_path", help="対象のHTMLファイルのパス")
+    parser.add_argument("--html", required=True, help="対象のHTMLファイルのパス")
+    parser.add_argument(
+        "--domain",
+        required=True,
+        help="HTMLファイルの取得元ドメイン (例: audee.jp)",
+    )
     parser.add_argument(
         "--download_dir",
         default=".",
         help="ダウンロード先のディレクトリ (デフォルト: カレントディレクトリ)",
     )
-    parser.add_argument(
-        "--domain",
-        required=True,
-        help="HTMLファイルの取得元ドメイン (例: bitfan.net)",
-    )
     args = parser.parse_args()
 
     # 入力パスの検証
-    if not os.path.isfile(args.html_path):
-        print(f"エラー: 指定されたファイルが見つかりません: {args.html_path}")
+    if not os.path.isfile(args.html):
+        print(f"エラー: 指定されたファイルが見つかりません: {args.html}")
         exit(1)
 
+    # ダウンロードするディレクトリを安全に展開する
     download_directory = MyPathHelper.complete_safe_path(args.download_dir)
-    logger = MyLoggerHelper.setup_logger(__name__, download_directory)
-
+    # ディレクトリがなければ作成する
     if not os.path.exists(download_directory):
         os.makedirs(download_directory)
 
-    download_audio_from_html(args.html_path, download_directory, logger, args.domain)
+    # loggerを作成
+    logger = MyLoggerHelper.setup_logger(__name__, download_directory)
+
+    download_audio_from_html(args.html, args.domain, download_directory, logger=logger)
+
+    exit(0)
