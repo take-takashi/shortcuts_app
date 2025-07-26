@@ -62,6 +62,8 @@ def main(argv=None) -> int:
             file, split_size_bytes=split_size
         )
 
+        return 0
+
     except Exception as e:
         logger.error(f"エラー: {e}")
         return 1
