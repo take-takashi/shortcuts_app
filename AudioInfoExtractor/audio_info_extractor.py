@@ -1,6 +1,8 @@
 import html
 import json
+import logging
 import re
+import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -22,8 +24,22 @@ class AudioInfo:
 class AudioInfoExtractorBase(ABC):
     """音声情報抽出の基底クラス"""
 
-    def __init__(self, logger):
-        self.logger = logger
+    def __init__(self, logger=None):
+        if logger:
+            self.logger = logger
+        else:
+            # ロガーが渡されなかった場合、標準出力にログを出すシンプルなロガーを作成
+            log = logging.getLogger("AudioInfoExtractor")
+            # ハンドラが既に追加されていないか確認
+            if not log.handlers:
+                log.setLevel(logging.INFO)
+                handler = logging.StreamHandler(sys.stdout)
+                # フォーマットはシンプルにメッセージのみ
+                formatter = logging.Formatter("%(message)s")
+                handler.setFormatter(formatter)
+                log.addHandler(handler)
+                log.propagate = False
+            self.logger = log
 
     @abstractmethod
     def get_audio_info(self, html_content: str) -> list[AudioInfo] | None:
@@ -215,7 +231,7 @@ EXTRACTOR_MAP = {
 }
 
 
-def get_extractor(domain, logger):
+def get_extractor(domain, logger=None):
     """ドメイン名に一致するExtractorのインスタンスを返す"""
     for key, extractor_class in EXTRACTOR_MAP.items():
         if key in domain:
