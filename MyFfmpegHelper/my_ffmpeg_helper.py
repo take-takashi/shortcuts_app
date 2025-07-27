@@ -1,6 +1,16 @@
+import logging
 import math
 import os
 import subprocess
+from typing import TypedDict
+
+
+class FfmpegMetadata(TypedDict, total=False):
+    """ffmpegに渡すメタデータの型定義"""
+
+    title: str
+    artist: str
+    album: str
 
 
 class MyFfmpegHelper:
@@ -94,7 +104,7 @@ class MyFfmpegHelper:
 
     @staticmethod
     def get_keyframes(
-        input_video: str, split_time_sec: float = None, read_duration: int = 10
+        input_video: str, split_time_sec: float | None = None, read_duration: int = 10
     ) -> list[float]:
         """
         指定された動画からキーフレームの秒数リストを取得する。
@@ -296,7 +306,9 @@ class MyFfmpegHelper:
 
     @staticmethod
     def split_video_lossless_by_keyframes(
-        input_video: str, output_dir: str = None, split_size_bytes: int = 5 * 1024**3
+        input_video: str,
+        output_dir: str | None = None,
+        split_size_bytes: int = 5 * 1024**3,
     ) -> list[str]:
         """
         無劣化で動画をキーフレーム単位に分割する。
@@ -410,9 +422,9 @@ class MyFfmpegHelper:
             # パケットサイズの標準偏差を計算
             # TODO: これ問題
             mean = sum(packet_sizes) / len(packet_sizes)
-            variance = sum(
-                [((x - mean) ** 2) for x in packet_sizes]
-            ) / len(packet_sizes)
+            variance = sum([((x - mean) ** 2) for x in packet_sizes]) / len(
+                packet_sizes
+            )
             std_dev = math.sqrt(variance)
 
             print("mean = ", mean * 0.1)
@@ -427,3 +439,61 @@ class MyFfmpegHelper:
 
         except Exception as e:
             raise Exception(f"エラーが発生しました: {e}")
+
+    @staticmethod
+    def embed_metadata(
+        input_path: str,
+        output_path: str,
+        metadata: FfmpegMetadata,
+        cover_path: str | None = None,
+        logger: logging.Logger | None = None,
+    ):
+        """
+        音声ファイルにメタデータと（オプションで）カバー画像を埋め込みます。
+
+        Args:
+            input_path (str): 入力ファイルのパス。
+            output_path (str): 出力ファイルのパス。
+            metadata (dict): 埋め込むメタデータ。キーは 'title', 'artist', 'album' など。
+            cover_path (str, optional): カバー画像のパス。Defaults to None.
+            logger (optional): ロガーオブジェクト。Defaults to None.
+
+        Raises:
+            Exception: ffmpegの実行中にエラーが発生した場合。
+        """
+        try:
+            if logger:
+                log_msg = "ffmpegを使用してメタデータ"
+                if cover_path:
+                    log_msg += "とカバー画像を埋め込んでいます..."
+                else:
+                    log_msg += "を埋め込んでいます..."
+                logger.info(log_msg)
+
+            cmd = ["ffmpeg", "-i", input_path]
+
+            if cover_path:
+                cmd.extend(["-i", cover_path, "-map", "0", "-map", "1"])
+
+            cmd.extend(["-c", "copy"])
+
+            for key, value in metadata.items():
+                if value:  # 値が空でない場合のみ追加
+                    cmd.extend(["-metadata", f"{key}={value}"])
+
+            cmd.extend(["-y", output_path])
+
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+            if logger:
+                logger.info("ffmpeg処理が完了しました。")
+
+        except subprocess.CalledProcessError as e:
+            if logger:
+                logger.error(f"ffmpegの実行に失敗しました: {e}")
+                logger.error(f"ffmpeg stderr: {e.stderr}")
+            raise Exception(f"ffmpegの実行に失敗しました: {e.stderr}") from e
+        except Exception as e:
+            if logger:
+                logger.error(f"予期せぬエラーが発生しました: {e}", exc_info=True)
+            raise

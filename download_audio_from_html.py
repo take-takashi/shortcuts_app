@@ -1,10 +1,10 @@
 import argparse
 import os
-import subprocess
 
 import requests
 
 from AudioInfoExtractor import get_extractor
+from MyFfmpegHelper.my_ffmpeg_helper import FfmpegMetadata, MyFfmpegHelper
 from MyLoggerHelper.my_logger_helper import MyLoggerHelper
 from MyPathHelper.my_path_helper import MyPathHelper
 
@@ -23,7 +23,7 @@ def download_audio_from_html(html_path, domain, download_dir, *, logger):
             html_content = f.read()
 
         # ドメインに基づいて適切なExtractorを取得
-        extractor = get_extractor(domain, logger)
+        extractor = get_extractor(domain, logger=logger)
         if not extractor:
             logger.warning(f"未対応のドメインです: {domain}")
             return
@@ -55,6 +55,13 @@ def download_audio_from_html(html_path, domain, download_dir, *, logger):
             logger.info("ダウンロードが完了しました。")
 
             # --- ffmpeg処理 ---
+            metadata: FfmpegMetadata = {
+                "title": audio_info.episode_title,
+                "artist": audio_info.artist_name,
+                "album": audio_info.program_name,
+            }
+
+            temp_cover_path = None
             if audio_info.cover_image_url:
                 temp_cover_path = os.path.join(download_dir, "temp_cover.jpg")
                 logger.info(f"カバー画像をダウンロードしています: {temp_cover_path}")
@@ -62,56 +69,20 @@ def download_audio_from_html(html_path, domain, download_dir, *, logger):
                 with open(temp_cover_path, "wb") as f:
                     f.write(cover_res.content)
 
-                logger.info(
-                    "ffmpegを使用してメタデータとカバー画像を埋め込んでいます..."
-                )
-                ffmpeg_command = [
-                    "ffmpeg",
-                    "-i",
-                    temp_filepath,
-                    "-i",
-                    temp_cover_path,
-                    "-map",
-                    "0",
-                    "-map",
-                    "1",
-                    "-c",
-                    "copy",
-                    "-metadata",
-                    f"title={audio_info.episode_title}",
-                    "-metadata",
-                    f"artist={audio_info.artist_name}",
-                    "-metadata",
-                    f"album={audio_info.program_name}",
-                    "-y",
-                    final_filepath,
-                ]
-                subprocess.run(
-                    ffmpeg_command, check=True, capture_output=True, text=True
-                )
-                os.remove(temp_cover_path)
-            else:
-                logger.info("ffmpegを使用してメタデータを埋め込んでいます...")
-                ffmpeg_command = [
-                    "ffmpeg",
-                    "-i",
-                    temp_filepath,
-                    "-c",
-                    "copy",
-                    "-metadata",
-                    f"title={audio_info.episode_title}",
-                    "-metadata",
-                    f"artist={audio_info.artist_name}",
-                    "-metadata",
-                    f"album={audio_info.program_name}",
-                    "-y",
-                    final_filepath,
-                ]
-                subprocess.run(
-                    ffmpeg_command, check=True, capture_output=True, text=True
-                )
+            MyFfmpegHelper.embed_metadata(
+                input_path=temp_filepath,
+                output_path=final_filepath,
+                metadata=metadata,
+                cover_path=temp_cover_path,
+                logger=logger,
+            )
 
-            os.remove(temp_filepath)
+            # 一時ファイルを削除
+            if temp_cover_path and os.path.exists(temp_cover_path):
+                os.remove(temp_cover_path)
+            if os.path.exists(temp_filepath):
+                os.remove(temp_filepath)
+
             logger.info(f"処理が完了し、最終ファイルを保存しました: {final_filepath}")
 
     except Exception as e:
