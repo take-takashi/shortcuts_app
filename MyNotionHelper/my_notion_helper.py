@@ -58,6 +58,28 @@ class MyNotionHelper:
         except Exception as e:
             raise Exception(f"Notionデータベースの取得に失敗しました: {e}")
 
+    def get_page_id_by_title(self, database_id: str, title: str) -> str | None:
+        """
+        指定されたデータベース内で、タイトルに一致するページのIDを取得します。
+        """
+        try:
+            response = self.notion.databases.query(
+                database_id=database_id,
+                filter={
+                    "property": "タイトル",  # Notionのタイトルプロパティは通常「タイトル」
+                    "title": {
+                        "equals": title
+                    }
+                }
+            )
+            results = response.get("results")
+            if results and len(results) > 0:
+                return results[0]["id"]
+            return None
+        except Exception as e:
+            self.logger.error(f"Failed to get page ID by title '{title}' in database '{database_id}': {e}")
+            return None
+
     # NotionのDBに空のページを作成する関数
     def create_blank_page(self, database_id: str) -> str:
         """
@@ -447,25 +469,33 @@ class MyNotionHelper:
         except Exception as e:
             raise Exception(f"Notionへのアップロードに失敗しました: {e}")
 
-    def add_music_info_to_db(self, metadata: dict, file_path: str, database_id: str):
+    def add_music_info_to_db(self, metadata: dict, file_path: str, database_id: str, tags_database_id: str):
         """
         取得したメタデータをNotionデータベースに追加し、関連ファイルをアップロードします。
         """
+        # アーティストとアルバムのリレーションIDを取得
+        artist_id = self.get_page_id_by_title(tags_database_id, metadata.get("artist", "No Artist"))
+        album_id = self.get_page_id_by_title(tags_database_id, metadata.get("album", "No Album"))
+
         # Notionのページプロパティを作成（ファイルプロパティはupload_file関数で処理）
         properties = {
             "タイトル": {
                 "title": [{"text": {"content": metadata.get("title", "No Title")}}]
             },
-            "アーティスト": {
-                "rich_text": [
-                    {"text": {"content": metadata.get("artist", "No Artist")}}
-                ]
-            },
-            "アルバム": {
-                "rich_text": [{"text": {"content": metadata.get("album", "No Album")}}]
-            },
             "No": {"rich_text": [{"text": {"content": metadata.get("track", "-")}}]},
         }
+
+        # アーティストのリレーションプロパティを追加
+        if artist_id:
+            properties["アーティスト"] = {"relation": [{"id": artist_id}]}
+        else:
+            properties["アーティスト"] = {"relation": []}
+
+        # アルバムのリレーションプロパティを追加
+        if album_id:
+            properties["アルバム"] = {"relation": [{"id": album_id}]}
+        else:
+            properties["アルバム"] = {"relation": []}
 
         try:
             # Step 1: まずファイル以外のメタデータでページを作成する
