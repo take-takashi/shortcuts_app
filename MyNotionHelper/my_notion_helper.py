@@ -449,35 +449,47 @@ class MyNotionHelper:
 
     def add_music_info_to_db(self, metadata: dict, file_path: str, database_id: str):
         """
-        取得したメタデータをNotionデータベースに追加する
+        取得したメタデータをNotionデータベースに追加し、関連ファイルをアップロードします。
         """
-        # Notionのページプロパティを作成
+        # Notionのページプロパティを作成（ファイルプロパティはupload_file関数で処理）
         properties = {
             "タイトル": {
-                "title": [{"text": {"content": metadata.get("title", "No Title")}}] 
+                "title": [{"text": {"content": metadata.get("title", "No Title")}}]
             },
             "アーティスト": {
-                "rich_text": [{"text": {"content": metadata.get("artist", "No Artist")}}] 
+                "rich_text": [
+                    {"text": {"content": metadata.get("artist", "No Artist")}}
+                ]
             },
             "アルバム": {
-                "rich_text": [{"text": {"content": metadata.get("album", "No Album")}}] 
+                "rich_text": [{"text": {"content": metadata.get("album", "No Album")}}]
             },
-            "No": {
-                "rich_text": [{"text": {"content": metadata.get("track", "-")}}] 
-            },
-            "ファイル": {
-                "files": [{"name": os.path.basename(file_path), "type": "external", "external": {"url": f"file://{file_path}"}}]
-            }
+            "No": {"rich_text": [{"text": {"content": metadata.get("track", "-")}}]},
         }
 
         try:
-            self.notion.pages.create(
-                parent={"database_id": database_id},
-                properties=properties
+            # Step 1: まずファイル以外のメタデータでページを作成する
+            self.logger.info(f"Creating Notion page with metadata for {file_path}...")
+            new_page_response: dict = self.notion.pages.create(
+                parent={"database_id": database_id}, properties=properties
+            )  # type: ignore
+            page_id = new_page_response["id"]
+            self.logger.info(f"Page created with ID: {page_id}")
+
+            # Step 2: 作成したページにファイルをアップロードする
+            # upload_file関数が、ページのブロックとファイルプロパティの両方に添付してくれる
+            self.logger.info(
+                f"Uploading file '{os.path.basename(file_path)}' to page {page_id}..."
             )
-            print("Successfully added to Notion.")
+            self.upload_file(page_id=page_id, file_path=file_path)
+
+            self.logger.info(
+                "Successfully added music info and uploaded file to Notion."
+            )
+
         except Exception as e:
-            print(f"Error adding to Notion: {e}")
+            self.logger.error(f"Failed to add music info to Notion: {e}")
+            raise e
 
         # End of upload_file method
 
