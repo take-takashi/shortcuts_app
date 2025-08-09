@@ -70,6 +70,13 @@ takashi@Mac shortcuts_app % source .venv/bin/activate
 .venvtakashi@Mac shortcuts_app % python -m playwright install
 ```
 
+## install package
+
+```bash
+shortcuts_app % uv add pyright==1.1.403 --dev
+shortcuts_app % uv add pymarkdownlnt==0.9.31 --dev
+```
+
 ## memo
 
 - TODO: My***をsrcに移動
