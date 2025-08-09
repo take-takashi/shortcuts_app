@@ -45,3 +45,29 @@ def test_is_vbr_empty_file():
             MyFfmpegHelper.is_vbr(empty_file_path)
     finally:
         os.remove(empty_file_path)
+
+def test_get_audio_metadata():
+    """音声ファイルからメタデータを正しく取得できるかテスト"""
+    audio_file_path = "./tests/sample.mp3"
+    
+    # 期待されるメタデータ
+    expected_metadata = {
+        "title": "タイトル表示",
+        "album": "効果音ラボ",
+        "artist": "サンプルミュージシャン",
+        "track": "1/1",
+        "date": "2025",
+        "genre": "Soundtrack"
+    }
+
+    # メタデータを取得
+    actual_metadata = MyFfmpegHelper.get_audio_metadata(audio_file_path)
+
+    # 取得したメタデータが期待通りか検証
+    assert actual_metadata is not None
+    assert actual_metadata.get("title") == expected_metadata["title"]
+    assert actual_metadata.get("album") == expected_metadata["album"]
+    assert actual_metadata.get("artist") == expected_metadata["artist"]
+    assert actual_metadata.get("track") == expected_metadata["track"]
+    assert actual_metadata.get("date") == expected_metadata["date"]
+    assert actual_metadata.get("genre") == expected_metadata["genre"]

@@ -444,6 +444,9 @@ class MyNotionHelper:
                 # プロパティへの添付に失敗した場合はログに記録しますが、ページへの添付は成功しているため処理を続行
                 self.logger.warning(f"Failed to attach file to property: {e}")
 
+        except Exception as e:
+            raise Exception(f"Notionへのアップロードに失敗しました: {e}")
+
     def add_music_info_to_db(self, metadata: dict, file_path: str, database_id: str):
         """
         取得したメタデータをNotionデータベースに追加する
@@ -475,9 +478,6 @@ class MyNotionHelper:
             print("Successfully added to Notion.")
         except Exception as e:
             print(f"Error adding to Notion: {e}")
-
-        except Exception as e:
-            raise Exception(f"Notionへのアップロードに失敗しました: {e}")
 
         # End of upload_file method
 

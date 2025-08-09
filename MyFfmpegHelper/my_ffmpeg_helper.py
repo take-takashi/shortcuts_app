@@ -3,6 +3,7 @@ import math
 import os
 import subprocess
 from typing import TypedDict
+import ffmpeg
 
 
 class FfmpegMetadata(TypedDict, total=False):
