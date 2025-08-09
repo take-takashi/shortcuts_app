@@ -14,25 +14,27 @@ dependencies = [
     "playwright==1.53.0",
     "pathvalidate==3.3.1",
     "beautifulsoup4==4.13.4",
-    "lxml==6.0.0"
+    "lxml==6.0.0",
 ]
 
 [project.optional-dependencies]
-test = [
-    "pytest==8.4.1"
-]
+test = ["pytest==8.4.1"]
 
 [tool.setuptools]
-packages = ["MyPathHelper", "MyNotionHelper", "MyFfmpegHelper", "MyLoggerHelper"]
+packages = [
+    "MyPathHelper",
+    "MyNotionHelper",
+    "MyFfmpegHelper",
+    "MyLoggerHelper",
+]
 
 [dependency-groups]
-dev = [
-    "pymarkdownlnt==0.9.31",
-    "pyright==1.1.403",
-    "pytest==8.4.1",
-]
+dev = ["pymarkdownlnt==0.9.31", "pyright==1.1.403", "pytest==8.4.1"]
 
 [tool.pytest.ini_options]
 log_cli = true
 log_cli_level = "INFO"
 log_cli_format = "%(message)s"
+
+[tool.pyright]
+typeCheckingMode = "basic"
