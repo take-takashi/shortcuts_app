@@ -46,13 +46,13 @@ class MyNotionHelper:
     # Notionデータベースからアイテムを取得する関数
     def get_items(self, database_id) -> list:
         try:
-            response: dict = self.notion.databases.query(  # type: ignore
+            response = self.notion.databases.query(  # type: ignore
                 database_id=database_id,
                 # プロパティ「処理済」が未チェックのアイテムを取得
                 filter={"property": "処理済", "checkbox": {"equals": False}},
             )
 
-            return response.get("results", [])
+            return response.get("results", [])  # type: ignore
 
         # 何かしらのエラーが発生した場合は空のリストを返す
         except Exception as e:
@@ -67,17 +67,17 @@ class MyNotionHelper:
                 database_id=database_id,
                 filter={
                     "property": "タイトル",  # Notionのタイトルプロパティは通常「タイトル」
-                    "title": {
-                        "equals": title
-                    }
-                }
+                    "title": {"equals": title},
+                },
             )
-            results = response.get("results")
+            results = response.get("results")  # type: ignore[reportAttributeAccessIssue]
             if results and len(results) > 0:
                 return results[0]["id"]
             return None
         except Exception as e:
-            self.logger.error(f"Failed to get page ID by title '{title}' in database '{database_id}': {e}")
+            self.logger.error(
+                f"Failed to get page ID by title '{title}' in database '{database_id}': {e}"
+            )
             return None
 
     # NotionのDBに空のページを作成する関数
@@ -95,16 +95,16 @@ class MyNotionHelper:
             Exception: ページの作成に失敗した場合に発生します。
         """
         try:
-            response: dict = self.notion.pages.create(
+            response = self.notion.pages.create(
                 parent={"database_id": database_id},
             )  # type: ignore
 
             # 200OK以外はエラーを投げる
-            if response.get("object") != "page":
+            if response.get("object") != "page":  # type: ignore
                 raise Exception("Failed to create page: Not a page object")
 
             # 作成したpage_idを返す
-            return response.get("id") or ""
+            return response.get("id") or ""  # type: ignore
         except Exception as e:
             raise Exception(f"Failed to create page: {e}")
 
@@ -469,13 +469,19 @@ class MyNotionHelper:
         except Exception as e:
             raise Exception(f"Notionへのアップロードに失敗しました: {e}")
 
-    def add_music_info_to_db(self, metadata: dict, file_path: str, database_id: str, tags_database_id: str):
+    def add_music_info_to_db(
+        self, metadata: dict, file_path: str, database_id: str, tags_database_id: str
+    ):
         """
         取得したメタデータをNotionデータベースに追加し、関連ファイルをアップロードします。
         """
         # アーティストとアルバムのリレーションIDを取得
-        artist_id = self.get_page_id_by_title(tags_database_id, metadata.get("artist", "No Artist"))
-        album_id = self.get_page_id_by_title(tags_database_id, metadata.get("album", "No Album"))
+        artist_id = self.get_page_id_by_title(
+            tags_database_id, metadata.get("artist", "No Artist")
+        )
+        album_id = self.get_page_id_by_title(
+            tags_database_id, metadata.get("album", "No Album")
+        )
 
         # Notionのページプロパティを作成（ファイルプロパティはupload_file関数で処理）
         properties = {
@@ -487,15 +493,15 @@ class MyNotionHelper:
 
         # アーティストのリレーションプロパティを追加
         if artist_id:
-            properties["アーティスト"] = {"relation": [{"id": artist_id}]}
+            properties["アーティスト"] = {"relation": [{"id": artist_id}]}  # type: ignore
         else:
-            properties["アーティスト"] = {"relation": []}
+            properties["アーティスト"] = {"relation": []}  # type: ignore
 
         # アルバムのリレーションプロパティを追加
         if album_id:
-            properties["アルバム"] = {"relation": [{"id": album_id}]}
+            properties["アルバム"] = {"relation": [{"id": album_id}]}  # type: ignore
         else:
-            properties["アルバム"] = {"relation": []}
+            properties["アルバム"] = {"relation": []}  # type: ignore
 
         try:
             # Step 1: まずファイル以外のメタデータでページを作成する
