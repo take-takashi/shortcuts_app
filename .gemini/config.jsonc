@@ -1,0 +1,31 @@
+{
+    "language": "ja",
+    "model": "gemini-2.5-pro",
+    "development_style": {
+        "method": "TDD",
+        "philosophy": "t-wada-style",
+        "principles": [
+            "Test First",
+            "Red-Green-Refactor",
+            "Baby Steps",
+            "Testable Design"
+        ],
+        "coding_guidelines": [
+            "ソースは意味のあるブロック単位で「何をしているブロックなのか」がわかるように日本語でコメントを入れる。",
+            "依頼した作業が完了したら修正したファイル群を適切なメッセージでcommitする。"
+        ]
+    },
+    "package_manager": "uv",
+    "verification": {
+        "commands": [
+            {
+                "name": "pyright",
+                "command": "pyright",
+                "run_on": [
+                    "code_change"
+                ],
+                "fix_on_error": true
+            }
+        ]
+    }
+}
