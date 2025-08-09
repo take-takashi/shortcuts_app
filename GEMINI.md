@@ -54,6 +54,8 @@
   - 複数行のcommitはヒアドキュメントを利用する。
   - コミット内容はオーナーがレビューする。
 - t-wadaのテスト思考を取り入れたい。
+- ffmpeg(ffprobe)に関する操作は`MyFfmpegHelper`モジュールに実装し、それを利用すること。
+- Notion APIに関する操作は`MyNotionHelper`モジュールに実装し、それを利用すること。
 
 ## GEMINIとのやりとり仕様
 

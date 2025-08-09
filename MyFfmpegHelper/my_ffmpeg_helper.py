@@ -15,6 +15,21 @@ class FfmpegMetadata(TypedDict, total=False):
 
 class MyFfmpegHelper:
     @staticmethod
+    def get_audio_metadata(file_path: str) -> dict | None:
+        """
+        ffmpegを使って音声ファイルのメタデータを取得する
+        """
+        try:
+            # ffprobeでメタデータを取得
+            probe = ffmpeg.probe(file_path)
+            # format.tagsにメタデータが格納されている
+            metadata = probe.get("format", {}).get("tags", {})
+            return metadata
+        except ffmpeg.Error as e:
+            print(f"Error reading metadata: {e.stderr}")
+            return None
+
+    @staticmethod
     def get_duration_sec(input_video: str) -> float:
         """
         動画の長さ（秒：小数）を取得する。

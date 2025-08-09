@@ -444,6 +444,38 @@ class MyNotionHelper:
                 # プロパティへの添付に失敗した場合はログに記録しますが、ページへの添付は成功しているため処理を続行
                 self.logger.warning(f"Failed to attach file to property: {e}")
 
+    def add_music_info_to_db(self, metadata: dict, file_path: str, database_id: str):
+        """
+        取得したメタデータをNotionデータベースに追加する
+        """
+        # Notionのページプロパティを作成
+        properties = {
+            "タイトル": {
+                "title": [{"text": {"content": metadata.get("title", "No Title")}}] 
+            },
+            "アーティスト": {
+                "rich_text": [{"text": {"content": metadata.get("artist", "No Artist")}}] 
+            },
+            "アルバム": {
+                "rich_text": [{"text": {"content": metadata.get("album", "No Album")}}] 
+            },
+            "No": {
+                "rich_text": [{"text": {"content": metadata.get("track", "-")}}] 
+            },
+            "ファイル": {
+                "files": [{"name": os.path.basename(file_path), "type": "external", "external": {"url": f"file://{file_path}"}}]
+            }
+        }
+
+        try:
+            self.notion.pages.create(
+                parent={"database_id": database_id},
+                properties=properties
+            )
+            print("Successfully added to Notion.")
+        except Exception as e:
+            print(f"Error adding to Notion: {e}")
+
         except Exception as e:
             raise Exception(f"Notionへのアップロードに失敗しました: {e}")
 
