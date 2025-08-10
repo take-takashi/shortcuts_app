@@ -66,7 +66,8 @@ class MyNotionHelper:
             response = self.notion.databases.query(
                 database_id=database_id,
                 filter={
-                    "property": "タイトル",  # Notionのタイトルプロパティは通常「タイトル」
+                    # "property": "タイトル",  # Notionのタイトルプロパティは通常「タイトル」
+                    "property": "Name",  # 自分のページでは「Name」だったため変更
                     "title": {"equals": title},
                 },
             )
@@ -78,6 +79,41 @@ class MyNotionHelper:
             self.logger.error(
                 f"Failed to get page ID by title '{title}' in database '{database_id}': {e}"
             )
+            return None
+
+    def get_or_create_tag_page(
+        self, database_id: str, title: str, category: str
+    ) -> str | None:
+        """
+        指定されたデータベースでタイトルに一致するページを取得、なければ作成します。
+        作成する場合、指定されたカテゴリも設定します。
+        """
+        # まずページを検索
+        page_id = self.get_page_id_by_title(database_id, title)
+        if page_id:
+            return page_id
+
+        # ページがなければ作成
+        self.logger.info(
+            f"'{title}' not found in database {database_id}. Creating new page..."
+        )
+        try:
+            properties = {
+                "Name": {"title": [{"text": {"content": title}}]},
+                "Category": {"select": {"name": category}},
+            }
+            new_page_response: dict = self.notion.pages.create(
+                parent={"database_id": database_id}, properties=properties
+            )  # type: ignore
+            new_page_id = new_page_response.get("id")
+            if new_page_id:
+                self.logger.info(f"Created page with ID: {new_page_id}")
+                return new_page_id
+            else:
+                self.logger.error(f"Failed to create page for title '{title}'.")
+                return None
+        except Exception as e:
+            self.logger.error(f"Failed to get or create page for title '{title}': {e}")
             return None
 
     # NotionのDBに空のページを作成する関数
@@ -475,12 +511,14 @@ class MyNotionHelper:
         """
         取得したメタデータをNotionデータベースに追加し、関連ファイルをアップロードします。
         """
-        # アーティストとアルバムのリレーションIDを取得
-        artist_id = self.get_page_id_by_title(
-            tags_database_id, metadata.get("artist", "No Artist")
+
+        # アルバムのリレーションIDを取得（なければ作成）
+        album_id = self.get_or_create_tag_page(
+            tags_database_id, metadata.get("album", "No Album"), "音楽"
         )
-        album_id = self.get_page_id_by_title(
-            tags_database_id, metadata.get("album", "No Album")
+        # アルバムアーティストのリレーションIDを取得（なければ作成）
+        album_artist_id = self.get_or_create_tag_page(
+            tags_database_id, metadata.get("album_artist", "No Album Artist"), "音楽"
         )
 
         # Notionのページプロパティを作成（ファイルプロパティはupload_file関数で処理）
@@ -489,19 +527,20 @@ class MyNotionHelper:
                 "title": [{"text": {"content": metadata.get("title", "No Title")}}]
             },
             "No": {"rich_text": [{"text": {"content": metadata.get("track", "-")}}]},
+            "トラックアーティスト": {"rich_text": [{"text": {"content": metadata.get("artist", "No Artist")}}]},
         }
-
-        # アーティストのリレーションプロパティを追加
-        if artist_id:
-            properties["アーティスト"] = {"relation": [{"id": artist_id}]}  # type: ignore
-        else:
-            properties["アーティスト"] = {"relation": []}  # type: ignore
 
         # アルバムのリレーションプロパティを追加
         if album_id:
             properties["アルバム"] = {"relation": [{"id": album_id}]}  # type: ignore
         else:
             properties["アルバム"] = {"relation": []}  # type: ignore
+
+        # アルバムアーティストのリレーションプロパティを追加
+        if album_artist_id:
+            properties["アルバムアーティスト"] = {"relation": [{"id": album_artist_id}]}  # type: ignore
+        else:
+            properties["アルバムアーティスト"] = {"relation": []}  # type: ignore
 
         try:
             # Step 1: まずファイル以外のメタデータでページを作成する
