@@ -58,7 +58,9 @@ class MyNotionHelper:
         except Exception as e:
             raise Exception(f"Notionデータベースの取得に失敗しました: {e}")
 
-    def get_page_id_by_title(self, database_id: str, title: str) -> str | None:
+    def get_page_id_by_title(
+        self, database_id: str, title: str, property_name: str = "Name"
+    ) -> str | None:
         """
         指定されたデータベース内で、タイトルに一致するページのIDを取得します。
         """
@@ -67,7 +69,8 @@ class MyNotionHelper:
                 database_id=database_id,
                 filter={
                     # "property": "タイトル",  # Notionのタイトルプロパティは通常「タイトル」
-                    "property": "Name",  # 自分のページでは「Name」だったため変更
+                    # "property": "Name",  # 自分のページでは「Name」だったため変更
+                    "property": property_name,
                     "title": {"equals": title},
                 },
             )
@@ -527,7 +530,11 @@ class MyNotionHelper:
                 "title": [{"text": {"content": metadata.get("title", "No Title")}}]
             },
             "No": {"rich_text": [{"text": {"content": metadata.get("track", "-")}}]},
-            "トラックアーティスト": {"rich_text": [{"text": {"content": metadata.get("artist", "No Artist")}}]},
+            "トラックアーティスト": {
+                "rich_text": [
+                    {"text": {"content": metadata.get("artist", "No Artist")}}
+                ]
+            },
         }
 
         # アルバムのリレーションプロパティを追加
