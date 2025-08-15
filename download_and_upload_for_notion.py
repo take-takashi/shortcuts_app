@@ -38,10 +38,11 @@ class VideoInfo:
 
 # 動画ファイル、サムネイルファイルをダウンロードして情報を返す関数
 def download_file(url: str, output_dir: str = "~/Downloads") -> VideoInfo:
-    outtmpl = f"{output_dir}/%(title)s_%(id)s.%(ext)s"
+    outtmpl = f"{output_dir}/%(title)s.%(ext)s"
 
     ydl_opts = {
         "outtmpl": outtmpl,
+        "trim_file_name": 95,
         "writethumbnail": True,
         "format": "bv[ext=mp4]+ba[ext=m4a]/bv+ba/best[ext=mp4]/best",
         "age_limit": 1985,
