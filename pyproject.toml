@@ -15,6 +15,8 @@ dependencies = [
     "pathvalidate==3.3.1",
     "beautifulsoup4==4.13.4",
     "lxml==6.0.0",
+    "pyautogui==0.9.54",
+    "pillow==11.3.0",
 ]
 
 [project.optional-dependencies]
