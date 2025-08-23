@@ -77,29 +77,41 @@ def take_screenshots(window, output_dir="screenshots"):
         os.makedirs(output_dir)
         print(f"'{output_dir}'ディレクトリを作成しました。")
 
+    # Retinaディスプレイ対応: スケールファクターを計算
+    # フルスクリーンショットのサイズ（物理ピクセル）を取得
+    with pyautogui.screenshot() as s:
+        screenshot_width, _ = s.size
+    # 画面の論理サイズを取得
+    screen_width, _ = pyautogui.size()
+    # スケールファクターを計算（通常1.0 or 2.0）
+    scale_factor = screenshot_width / screen_width
+
     try:
         i = 1
         # ユーザーが手動で停止するまでループ
         while True:
             # スクリーンショットを撮影
             screenshot_path = os.path.join(output_dir, f"page_{i:04d}.png")
-            # ウィンドウの領域のみを撮影
-            # screenshot = pyautogui.screenshot(
-            #    region=(window.left, window.top, window.width, window.height),
-            # )
-            screenshot = pyautogui.screenshot()
-            # screenshot関数でスクリーンショットを撮影すると、綺麗だが上部メニューバーなどが入ってしまう。
-            # しかし、regionで範囲指定すると画質が劣化してしまう。
-            # なので、フルスクリーンショットを撮った後、画像の上部などを削りたい。
-            # TODO: screenshotの上部からwindow.top分を削る
+
+            # フルスクリーンで撮影
+            full_screenshot = pyautogui.screenshot()
+
+            # Kindleウィンドウの領域を計算（物理ピクセル）
+            left = window.left * scale_factor
+            top = window.top * scale_factor
+            right = (window.left + window.width) * scale_factor
+            bottom = (window.top + window.height) * scale_factor
+
+            # 画像を切り抜く
+            cropped_screenshot = full_screenshot.crop((left, top, right, bottom))
 
             # 画像を保存
-            screenshot.save(screenshot_path)
+            cropped_screenshot.save(screenshot_path)
             print(f"{screenshot_path} を保存しました。")
 
             # ページ送り
             pyautogui.press("right")
-            print("ページ送りをしました。")
+            print("ページ送り\u3092しました。")
 
             i += 1
             # ページ送りのアニメーションなどを考慮して1秒待機
