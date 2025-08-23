@@ -50,6 +50,7 @@ kindleアプリで閲覧している本をページ送りをしながらスク�
 
 """
 
+import argparse
 import glob
 import os
 import sys
@@ -70,7 +71,7 @@ def get_kindle_window():
     return windows[0]
 
 
-def take_screenshots(window, output_dir="screenshots"):
+def take_screenshots(window, pages=None, output_dir="screenshots"):
     """スクリーンショットを撮影し、ページ送りを繰り返す"""
     # 保存先ディレクトリを作成
     if not os.path.exists(output_dir):
@@ -88,8 +89,12 @@ def take_screenshots(window, output_dir="screenshots"):
 
     try:
         i = 1
-        # ユーザーが手動で停止するまでループ
         while True:
+            # ページ数指定がある場合、上限に達したらループを抜ける
+            if pages and i > pages:
+                print(f"\n指定された {pages} ページの撮影が完了しました。")
+                break
+
             # スクリーンショットを撮影
             screenshot_path = os.path.join(output_dir, f"page_{i:04d}.png")
 
@@ -111,7 +116,7 @@ def take_screenshots(window, output_dir="screenshots"):
 
             # ページ送り
             pyautogui.press("right")
-            print("ページ送り\u3092しました。")
+            print("ページ送りをしました。")
 
             i += 1
             # ページ送りのアニメーションなどを考慮して1秒待機
@@ -147,6 +152,13 @@ def convert_images_to_pdf(image_dir, output_pdf="output.pdf"):
 
 def main():
     """メイン処理"""
+    # コマンドライン引数の設定
+    parser = argparse.ArgumentParser(description="Kindleの本を撮影してPDF化します。")
+    parser.add_argument(
+        "-p", "--pages", type=int, help="撮影するページ数を指定します。指定しない場合は手動停止です。"
+    )
+    args = parser.parse_args()
+
     # STEP1: Kindleアプリのウィンドウを取得し、アクティブにする
     kindle_window = get_kindle_window()
     kindle_window.activate()
@@ -156,11 +168,14 @@ def main():
     print("width = ", kindle_window.width)
     print("height = ", kindle_window.height)
 
-    print("3秒後に撮影を開始します... (Ctrl+Cで停止)")
+    if args.pages:
+        print(f"{args.pages}ページの撮影を3秒後に開始します...")
+    else:
+        print("3秒後に撮影を開始します... (Ctrl+Cで停止)")
     time.sleep(3)
 
     # STEP2: スクリーンショットとページ送りの繰り返し
-    screenshot_dir = take_screenshots(kindle_window)
+    screenshot_dir = take_screenshots(kindle_window, pages=args.pages)
 
     # STEP3: PDF化して保存
     if screenshot_dir:
