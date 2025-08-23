@@ -48,6 +48,10 @@ kindleアプリで閲覧している本をページ送りをしながらスク�
 
 - フォルダに保存された連番のスクリーンショット画像を1つのPDFとして保存する。
 
+## TODO
+
+- テストの充実
+
 """
 
 import argparse
@@ -115,7 +119,9 @@ def take_screenshots(window, output_dir, pages=None, auto_stop=False):
                 diff = ImageChops.difference(previous_screenshot, cropped_screenshot)
                 # 差分がなければ（画像が同じなら）ループを抜ける
                 if diff.getbbox() is None:
-                    print("\n前のページと同じ画像のため、最終ページと判断して停止します。")
+                    print(
+                        "\n前のページと同じ画像のため、最終ページと判断して停止します。"
+                    )
                     break  # このループで撮影した画像は保存せずに終了
 
             # 画像を保存
@@ -249,11 +255,11 @@ def main():
             # 出力ファイルパスを構築
             pdf_filepath = os.path.join(args.output, f"{book_title}.pdf")
 
-            convert_images_to_pdf(
-                temp_dir, pdf_filepath, quality=args.quality
-            )
+            convert_images_to_pdf(temp_dir, pdf_filepath, quality=args.quality)
         else:
-            print("スクリーンショットが撮影されなかったため、PDFは作成されませんでした。")
+            print(
+                "スクリーンショットが撮影されなかったため、PDFは作成されませんでした。"
+            )
 
     print("処理が完了し、一時ファイルは自動的に削除されました。")
 
