@@ -24,3 +24,38 @@ flag "--domain <domain>" help="ドメインを指定"
 '''
 alias = "teai"
 run = "python tools/extract_audio_info.py ${usage_htmlfile} ${usage_domain}"
+
+[tasks.save-book-for-kindle]
+description = "Kindleの本を撮影してPDF化します"
+alias = "sbk"
+usage = '''
+arg "output_dir" help="PDFの出力先ディレクトリを指定"
+flag "--pages <pages>" help="撮影するページ数を指定"
+flag "--auto-stop" help="ページの最後に到達した際に自動で撮影を停止"
+flag "--quality <quality>" help="出力PDFの画質を指定(high, medium, low)"
+'''
+run = '''
+#!/bin/bash
+set -euo pipefail
+
+# --outputは必須引数
+cmd=("python" "save_book_for_kindle.py" "--output" "${usage_output_dir:?output_dir is required}")
+
+# --pagesが指定されていれば追加
+if [[ -n "${usage_pages:-}" ]]; then
+  cmd+=("--pages" "${usage_pages}")
+fi
+
+# --auto-stopが指定されていれば追加
+if [[ -n "${usage_auto_stop:-}" ]]; then
+  cmd+=("--auto-stop")
+fi
+
+# --qualityが指定されていれば追加
+if [[ -n "${usage_quality:-}" ]]; then
+  cmd+=("--quality" "${usage_quality}")
+fi
+
+# 組み立てたコマンドを実行
+exec "${cmd[@]}"
+'''
