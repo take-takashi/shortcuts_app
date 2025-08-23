@@ -59,7 +59,7 @@ import time
 
 import pyautogui
 import pywinctl as pwc
-from PIL import Image
+from PIL import Image, ImageChops
 
 
 def get_kindle_window():
@@ -72,7 +72,7 @@ def get_kindle_window():
     return windows[0]
 
 
-def take_screenshots(window, output_dir, pages=None):
+def take_screenshots(window, output_dir, pages=None, auto_stop=False):
     """スクリーンショットを撮影し、ページ送りを繰り返す"""
     # Retinaディスプレイ対応: スケールファクターを計算
     # フルスクリーンショットのサイズ（物理ピクセル）を取得
@@ -82,6 +82,8 @@ def take_screenshots(window, output_dir, pages=None):
     screen_width, _ = pyautogui.size()
     # スケールファクターを計算（通常1.0 or 2.0）
     scale_factor = screenshot_width / screen_width
+
+    previous_screenshot = None
 
     try:
         i = 1
@@ -106,9 +108,21 @@ def take_screenshots(window, output_dir, pages=None):
             # 画像を切り抜く
             cropped_screenshot = full_screenshot.crop((left, top, right, bottom))
 
+            # 画像比較による自動停止処理
+            if auto_stop and previous_screenshot:
+                # 差分を計算
+                diff = ImageChops.difference(previous_screenshot, cropped_screenshot)
+                # 差分がなければ（画像が同じなら）ループを抜ける
+                if diff.getbbox() is None:
+                    print("\n前のページと同じ画像のため、最終ページと判断して停止します。")
+                    break  # このループで撮影した画像は保存せずに終了
+
             # 画像を保存
             cropped_screenshot.save(screenshot_path)
             print(f"{screenshot_path} を保存しました。")
+
+            # 現在の画像を次の比較のために保持
+            previous_screenshot = cropped_screenshot.copy()
 
             # ページ送り
             pyautogui.press("right")
@@ -162,6 +176,11 @@ def main():
         default=".",
         help="PDFの出力先ディレクトリを指定します。デフォルトはカレントディレクトリです。",
     )
+    parser.add_argument(
+        "--auto-stop",
+        action="store_true",
+        help="ページの最後に到達した際に自動で撮影を停止します。",
+    )
     args = parser.parse_args()
 
     # STEP1: Kindleアプリのウィンドウを取得し、アクティブにする
@@ -184,7 +203,12 @@ def main():
         time.sleep(3)
 
         # STEP2: スクリーンショットとページ送りの繰り返し
-        take_screenshots(kindle_window, output_dir=temp_dir, pages=args.pages)
+        take_screenshots(
+            kindle_window,
+            output_dir=temp_dir,
+            pages=args.pages,
+            auto_stop=args.auto_stop,
+        )
 
         # STEP3: PDF化して保存
         # 一時ディレクトリに画像ファイルが1つ以上存在する場合のみPDF化を実行
