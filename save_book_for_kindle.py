@@ -73,6 +73,7 @@ def get_kindle_window():
 
 def take_screenshots(window, pages=None, output_dir="screenshots"):
     """スクリーンショットを撮影し、ページ送りを繰り返す"""
+    # TODO: 保存先をtemp用のディレクトリにできる？
     # 保存先ディレクトリを作成
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -140,6 +141,7 @@ def convert_images_to_pdf(image_dir, output_pdf="output.pdf"):
     # Pillowで画像を開く
     images = [Image.open(p) for p in image_paths]
 
+    # TODO: 保存先ディレクトリをコマンド引数で指定したい。
     # PDFとして保存
     images[0].save(
         output_pdf,
@@ -147,7 +149,9 @@ def convert_images_to_pdf(image_dir, output_pdf="output.pdf"):
         append_images=images[1:],
         resolution=300.0,
     )
+    # TODO: PDFのファイルサイズを200MBまでに収めたいが何かいい方法はあるか？
     print(f"PDFファイル '{output_pdf}' を作成しました。")
+    # TODO: PDFの保存ができたらこれまでのスクリーンショットは削除したい。
 
 
 def main():
@@ -155,7 +159,10 @@ def main():
     # コマンドライン引数の設定
     parser = argparse.ArgumentParser(description="Kindleの本を撮影してPDF化します。")
     parser.add_argument(
-        "-p", "--pages", type=int, help="撮影するページ数を指定します。指定しない場合は手動停止です。"
+        "-p",
+        "--pages",
+        type=int,
+        help="撮影するページ数を指定します。指定しない場合は手動停止です。",
     )
     args = parser.parse_args()
 
