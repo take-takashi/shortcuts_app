@@ -52,6 +52,7 @@ kindleアプリで閲覧している本をページ送りをしながらスク�
 
 import argparse
 import glob
+import io
 import os
 import sys
 import tempfile
@@ -135,7 +136,7 @@ def take_screenshots(window, output_dir, pages=None, auto_stop=False):
         print("\n手動で停止されました。撮影処理を終了します。")
 
 
-def convert_images_to_pdf(image_dir, output_pdf="output.pdf"):
+def convert_images_to_pdf(image_dir, output_pdf="output.pdf", quality="high"):
     """画像群をPDFに変換する"""
     # 画像ファイルの一覧を取得
     image_paths = sorted(glob.glob(os.path.join(image_dir, "*.png")))
@@ -143,19 +144,37 @@ def convert_images_to_pdf(image_dir, output_pdf="output.pdf"):
         print("画像ファイルが見つかりません。", file=sys.stderr)
         return
 
-    print(f"{len(image_paths)}個の画像をPDFに変換します。")
+    print(f"{len(image_paths)}個の画像をPDFに変換します。(画質: {quality})")
 
     # Pillowで画像を開く
-    images = [Image.open(p) for p in image_paths]
+    pil_images = [Image.open(p) for p in image_paths]
+
+    # high以外の場合はJPEGに変換して画質を落とす
+    if quality != "high":
+        jpeg_quality = {"medium": 85, "low": 75}[quality]
+
+        images_to_save = []
+        for img in pil_images:
+            # PNGにアルファチャンネルがある場合、RGBに変換しないとJPEG保存でエラーになる
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+
+            # メモリ上でJPEGに変換し、再度読み込む
+            buffer = io.BytesIO()
+            img.save(buffer, "JPEG", quality=jpeg_quality)
+            buffer.seek(0)
+            jpeg_image = Image.open(buffer)
+            images_to_save.append(jpeg_image)
+
+        pil_images = images_to_save
 
     # PDFとして保存
-    images[0].save(
+    pil_images[0].save(
         output_pdf,
         save_all=True,
-        append_images=images[1:],
+        append_images=pil_images[1:],
         resolution=300.0,
     )
-    # TODO: PDFのファイルサイズを200MBまでに収めたいが何かいい方法はあるか？
     print(f"PDFファイル '{output_pdf}' を作成しました。")
 
 
@@ -180,6 +199,14 @@ def main():
         "--auto-stop",
         action="store_true",
         help="ページの最後に到達した際に自動で撮影を停止します。",
+    )
+    parser.add_argument(
+        "-q",
+        "--quality",
+        type=str,
+        default="high",
+        choices=["high", "medium", "low"],
+        help="出力PDFの画質を指定します。high, medium, lowから選択。デフォルトはhigh。",
     )
     args = parser.parse_args()
 
@@ -222,7 +249,9 @@ def main():
             # 出力ファイルパスを構築
             pdf_filepath = os.path.join(args.output, f"{book_title}.pdf")
 
-            convert_images_to_pdf(temp_dir, pdf_filepath)
+            convert_images_to_pdf(
+                temp_dir, pdf_filepath, quality=args.quality
+            )
         else:
             print("スクリーンショットが撮影されなかったため、PDFは作成されませんでした。")
 
