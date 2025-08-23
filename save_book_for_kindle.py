@@ -84,9 +84,16 @@ def take_screenshots(window, output_dir="screenshots"):
             # スクリーンショットを撮影
             screenshot_path = os.path.join(output_dir, f"page_{i:04d}.png")
             # ウィンドウの領域のみを撮影
-            screenshot = pyautogui.screenshot(
-                region=(window.left, window.top, window.width, window.height),
-            )
+            # screenshot = pyautogui.screenshot(
+            #    region=(window.left, window.top, window.width, window.height),
+            # )
+            screenshot = pyautogui.screenshot()
+            # screenshot関数でスクリーンショットを撮影すると、綺麗だが上部メニューバーなどが入ってしまう。
+            # しかし、regionで範囲指定すると画質が劣化してしまう。
+            # なので、フルスクリーンショットを撮った後、画像の上部などを削りたい。
+            # TODO: screenshotの上部からwindow.top分を削る
+
+            # 画像を保存
             screenshot.save(screenshot_path)
             print(f"{screenshot_path} を保存しました。")
 
@@ -114,10 +121,15 @@ def convert_images_to_pdf(image_dir, output_pdf="output.pdf"):
     print(f"{len(image_paths)}個の画像をPDFに変換します。")
 
     # Pillowで画像を開く
-    images = [Image.open(p).convert("RGB") for p in image_paths]
+    images = [Image.open(p) for p in image_paths]
 
     # PDFとして保存
-    images[0].save(output_pdf, save_all=True, append_images=images[1:])
+    images[0].save(
+        output_pdf,
+        save_all=True,
+        append_images=images[1:],
+        resolution=300.0,
+    )
     print(f"PDFファイル '{output_pdf}' を作成しました。")
 
 
