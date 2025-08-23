@@ -48,3 +48,87 @@ kindleアプリで閲覧している本をページ送りをしながらスク�
 - フォルダに保存された連番のスクリーンショット画像を1つのPDFとして保存する。
 
 """
+import sys
+import pyautogui
+import os
+import time
+import glob
+from PIL import Image
+
+def get_kindle_window():
+    """Kindleアプリのウィンドウを取得する"""
+    # Kindleアプリのウィンドウを取得
+    get_windows_func = getattr(pyautogui, 'getWindowsWithTitle')
+    windows = get_windows_func("Kindle")
+    if not windows:
+        print("Kindleアプリが起動していません。", file=sys.stderr)
+        sys.exit(1)
+    return windows[0]
+
+def take_screenshots(window, output_dir="screenshots"):
+    """スクリーンショットを撮影し、ページ送りを繰り返す"""
+    # 保存先ディレクトリを作成
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        print(f"'{output_dir}'ディレクトリを作成しました。")
+
+    try:
+        i = 1
+        # ユーザーが手動で停止するまでループ
+        while True:
+            # スクリーンショットを撮影
+            screenshot_path = os.path.join(output_dir, f"page_{i:04d}.png")
+            # ウィンドウの領域のみを撮影
+            pyautogui.screenshot(screenshot_path, region=(window.left, window.top, window.width, window.height))
+            print(f"{screenshot_path} を保存しました。")
+
+            # ページ送り
+            pyautogui.press('right')
+            print("ページ送りをしました。")
+
+            i += 1
+            # ページ送りのアニメーションなどを考慮して1秒待機
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n手動で停止されました。撮影処理を終了します。")
+    
+    return output_dir
+
+def convert_images_to_pdf(image_dir, output_pdf="output.pdf"):
+    """画像群をPDFに変換する"""
+    # 画像ファイルの一覧を取得
+    image_paths = sorted(glob.glob(os.path.join(image_dir, "*.png")))
+    if not image_paths:
+        print("画像ファイルが見つかりません。", file=sys.stderr)
+        return
+
+    print(f"{len(image_paths)}個の画像をPDFに変換します。")
+    
+    # Pillowで画像を開く
+    images = [Image.open(p).convert("RGB") for p in image_paths]
+    
+    # PDFとして保存
+    images[0].save(output_pdf, save_all=True, append_images=images[1:])
+    print(f"PDFファイル '{output_pdf}' を作成しました。")
+
+def main():
+    """メイン処理"""
+    # STEP1: Kindleアプリのウィンドウを取得し、アクティブにする
+    kindle_window = get_kindle_window()
+    kindle_window.activate()
+    print(f"'{kindle_window.title}'をアクティブにしました。")
+    print("3秒後に撮影を開始します... (Ctrl+Cで停止)")
+    time.sleep(3)
+
+    # STEP2: スクリーンショットとページ送りの繰り返し
+    screenshot_dir = take_screenshots(kindle_window)
+
+    # STEP3: PDF化して保存
+    if screenshot_dir:
+        # ファイル名を本のタイトルから取得（ウィンドウタイトルから不要な部分を削除）
+        book_title = kindle_window.title.replace(" - Kindle", "").strip()
+        pdf_filename = f"{book_title}.pdf"
+        convert_images_to_pdf(screenshot_dir, pdf_filename)
+
+if __name__ == "__main__":
+    main()

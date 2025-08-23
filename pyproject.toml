@@ -31,7 +31,11 @@ packages = [
 ]
 
 [dependency-groups]
-dev = ["pymarkdownlnt==0.9.31", "pyright==1.1.403", "pytest==8.4.1"]
+dev = [
+    "pymarkdownlnt==0.9.31",
+    "pyright==1.1.404",
+    "pytest==8.4.1",
+]
 
 [tool.pytest.ini_options]
 log_cli = true
