@@ -54,6 +54,7 @@ import argparse
 import glob
 import os
 import sys
+import tempfile
 import time
 
 import pyautogui
@@ -71,14 +72,8 @@ def get_kindle_window():
     return windows[0]
 
 
-def take_screenshots(window, pages=None, output_dir="screenshots"):
+def take_screenshots(window, output_dir, pages=None):
     """スクリーンショットを撮影し、ページ送りを繰り返す"""
-    # TODO: 保存先をtemp用のディレクトリにできる？
-    # 保存先ディレクトリを作成
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-        print(f"'{output_dir}'ディレクトリを作成しました。")
-
     # Retinaディスプレイ対応: スケールファクターを計算
     # フルスクリーンショットのサイズ（物理ピクセル）を取得
     with pyautogui.screenshot() as s:
@@ -125,8 +120,6 @@ def take_screenshots(window, pages=None, output_dir="screenshots"):
     except KeyboardInterrupt:
         print("\n手動で停止されました。撮影処理を終了します。")
 
-    return output_dir
-
 
 def convert_images_to_pdf(image_dir, output_pdf="output.pdf"):
     """画像群をPDFに変換する"""
@@ -151,7 +144,6 @@ def convert_images_to_pdf(image_dir, output_pdf="output.pdf"):
     )
     # TODO: PDFのファイルサイズを200MBまでに収めたいが何かいい方法はあるか？
     print(f"PDFファイル '{output_pdf}' を作成しました。")
-    # TODO: PDFの保存ができたらこれまでのスクリーンショットは削除したい。
 
 
 def main():
@@ -168,28 +160,37 @@ def main():
 
     # STEP1: Kindleアプリのウィンドウを取得し、アクティブにする
     kindle_window = get_kindle_window()
-    kindle_window.activate()
-    print(f"'{kindle_window.title}'をアクティブにしました。")
-    print("left = ", kindle_window.left)
-    print("top = ", kindle_window.top)
-    print("width = ", kindle_window.width)
-    print("height = ", kindle_window.height)
 
-    if args.pages:
-        print(f"{args.pages}ページの撮影を3秒後に開始します...")
-    else:
-        print("3秒後に撮影を開始します... (Ctrl+Cで停止)")
-    time.sleep(3)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        print(f"一時ディレクトリ '{temp_dir}' を作成しました。")
 
-    # STEP2: スクリーンショットとページ送りの繰り返し
-    screenshot_dir = take_screenshots(kindle_window, pages=args.pages)
+        kindle_window.activate()
+        print(f"'{kindle_window.title}'をアクティブにしました。")
+        print("left = ", kindle_window.left)
+        print("top = ", kindle_window.top)
+        print("width = ", kindle_window.width)
+        print("height = ", kindle_window.height)
 
-    # STEP3: PDF化して保存
-    if screenshot_dir:
-        # ファイル名を本のタイトルから取得（ウィンドウタイトルから不要な部分を削除）
-        book_title = kindle_window.title.replace(" - Kindle", "").strip()
-        pdf_filename = f"{book_title}.pdf"
-        convert_images_to_pdf(screenshot_dir, pdf_filename)
+        if args.pages:
+            print(f"{args.pages}ページの撮影を3秒後に開始します...")
+        else:
+            print("3秒後に撮影を開始します... (Ctrl+Cで停止)")
+        time.sleep(3)
+
+        # STEP2: スクリーンショットとページ送りの繰り返し
+        take_screenshots(kindle_window, output_dir=temp_dir, pages=args.pages)
+
+        # STEP3: PDF化して保存
+        # 一時ディレクトリに画像ファイルが1つ以上存在する場合のみPDF化を実行
+        if len(os.listdir(temp_dir)) > 0:
+            # ファイル名を本のタイトルから取得（ウィンドウタイトルから不要な部分を削除）
+            book_title = kindle_window.title.replace(" - Kindle", "").strip()
+            pdf_filename = f"{book_title}.pdf"
+            convert_images_to_pdf(temp_dir, pdf_filename)
+        else:
+            print("スクリーンショットが撮影されなかったため、PDFは作成されませんでした。")
+
+    print("処理が完了し、一時ファイルは自動的に削除されました。")
 
 
 if __name__ == "__main__":
