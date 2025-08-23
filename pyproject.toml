@@ -17,6 +17,7 @@ dependencies = [
     "lxml==6.0.0",
     "pyautogui==0.9.54",
     "pillow==11.3.0",
+    "pywinctl==0.4.1",
 ]
 
 [project.optional-dependencies]
