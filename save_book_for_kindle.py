@@ -134,7 +134,6 @@ def convert_images_to_pdf(image_dir, output_pdf="output.pdf"):
     # Pillowで画像を開く
     images = [Image.open(p) for p in image_paths]
 
-    # TODO: 保存先ディレクトリをコマンド引数で指定したい。
     # PDFとして保存
     images[0].save(
         output_pdf,
@@ -155,6 +154,13 @@ def main():
         "--pages",
         type=int,
         help="撮影するページ数を指定します。指定しない場合は手動停止です。",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default=".",
+        help="PDFの出力先ディレクトリを指定します。デフォルトはカレントディレクトリです。",
     )
     args = parser.parse_args()
 
@@ -183,10 +189,16 @@ def main():
         # STEP3: PDF化して保存
         # 一時ディレクトリに画像ファイルが1つ以上存在する場合のみPDF化を実行
         if len(os.listdir(temp_dir)) > 0:
+            # 出力先ディレクトリが存在しない場合は作成
+            os.makedirs(args.output, exist_ok=True)
+
             # ファイル名を本のタイトルから取得（ウィンドウタイトルから不要な部分を削除）
             book_title = kindle_window.title.replace(" - Kindle", "").strip()
-            pdf_filename = f"{book_title}.pdf"
-            convert_images_to_pdf(temp_dir, pdf_filename)
+
+            # 出力ファイルパスを構築
+            pdf_filepath = os.path.join(args.output, f"{book_title}.pdf")
+
+            convert_images_to_pdf(temp_dir, pdf_filepath)
         else:
             print("スクリーンショットが撮影されなかったため、PDFは作成されませんでした。")
 
