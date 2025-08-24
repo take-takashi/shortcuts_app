@@ -77,6 +77,21 @@ def get_kindle_window():
     return windows[0]
 
 
+def save_debug_images(i, previous_screenshot, cropped_screenshot, diff):
+    """画像比較に失敗した際にデバッグ用の画像を保存する"""
+    debug_dir = "debug_images"
+    os.makedirs(debug_dir, exist_ok=True)
+    # RGBモードに変換してから保存
+    previous_screenshot.convert("RGB").save(
+        os.path.join(debug_dir, f"page_{i-1}_previous.png")
+    )
+    cropped_screenshot.convert("RGB").save(
+        os.path.join(debug_dir, f"page_{i}_current.png")
+    )
+    diff.save(os.path.join(debug_dir, f"page_{i}_diff.png"))
+    print(f"デバッグ用の画像を {debug_dir} に保存しました。")
+
+
 def take_screenshots(window, output_dir, pages=None, auto_stop=False):
     """スクリーンショットを撮影し、ページ送りを繰り返す"""
     # Retinaディスプレイ対応: スケールファクターを計算
@@ -115,13 +130,19 @@ def take_screenshots(window, output_dir, pages=None, auto_stop=False):
 
             # 画像比較による自動停止処理
             if auto_stop and previous_screenshot:
+                # 比較前に両方の画像をRGBモードに変換してアルファチャンネルを削除
+                prev_rgb = previous_screenshot.convert("RGB")
+                curr_rgb = cropped_screenshot.convert("RGB")
+
                 # 差分を計算
-                diff = ImageChops.difference(previous_screenshot, cropped_screenshot)
+                diff = ImageChops.difference(prev_rgb, curr_rgb)
                 # 差分がなければ（画像が同じなら）ループを抜ける
                 if diff.getbbox() is None:
                     print(
                         "\n前のページと同じ画像のため、最終ページと判断して停止します。"
                     )
+                    # デバッグが必要な場合は以下の行のコメントを解除
+                    # save_debug_images(i, previous_screenshot, cropped_screenshot, diff)
                     break  # このループで撮影した画像は保存せずに終了
 
             # 画像を保存
