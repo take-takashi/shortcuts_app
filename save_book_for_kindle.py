@@ -83,7 +83,7 @@ def save_debug_images(i, previous_screenshot, cropped_screenshot, diff):
     os.makedirs(debug_dir, exist_ok=True)
     # RGBモードに変換してから保存
     previous_screenshot.convert("RGB").save(
-        os.path.join(debug_dir, f"page_{i-1}_previous.png")
+        os.path.join(debug_dir, f"page_{i - 1}_previous.png")
     )
     cropped_screenshot.convert("RGB").save(
         os.path.join(debug_dir, f"page_{i}_current.png")
