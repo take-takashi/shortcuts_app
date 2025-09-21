@@ -7,7 +7,7 @@ dependencies = [
     "notion-client==2.3.0",
     "python-dotenv==1.1.0",
     "requests==2.32.3",
-    "yt-dlp==2025.5.22",
+    "yt-dlp==2025.9.5",
     "ffmpeg-python==0.2.0",
     "selenium==4.34.2",
     "webdriver-manager==4.0.2",
@@ -32,11 +32,7 @@ packages = [
 ]
 
 [dependency-groups]
-dev = [
-    "pymarkdownlnt==0.9.31",
-    "pyright==1.1.404",
-    "pytest==8.4.1",
-]
+dev = ["pymarkdownlnt==0.9.31", "pyright==1.1.404", "pytest==8.4.1"]
 
 [tool.pytest.ini_options]
 log_cli = true
