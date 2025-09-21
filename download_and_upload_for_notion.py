@@ -7,6 +7,8 @@ from yt_dlp import YoutubeDL
 from MyLoggerHelper import MyLoggerHelper
 from MyNotionHelper import MyNotionHelper
 
+from typing import Any, cast
+
 # ===== Config Begin ==========================================================
 # .envを読み込む
 load_dotenv()
@@ -49,7 +51,7 @@ def download_file(url: str, output_dir: str = "~/Downloads") -> VideoInfo:
     }
 
     try:
-        with YoutubeDL(ydl_opts) as ydl:
+        with YoutubeDL(cast(Any, ydl_opts)) as ydl:
             # 動画のダウンロード
             info = ydl.extract_info(url, download=True)
 
@@ -130,7 +132,13 @@ def main():
 
             # URLからファイルをダウンロード
             logger.info(f"▶ URL「{url}」の動画をダウンロード中...")
-            video_info: VideoInfo = download_file(url)
+
+            try:
+                video_info: VideoInfo = download_file(url)
+            except Exception as e:
+                logger.error(f"URL「{url}」の動画のダウンロードに失敗しました: {e}")
+                continue
+
             logger.info(f"ダウンロードした動画のタイトル: {video_info.video_title}")
             logger.info(
                 f"ダウンロードした動画のファイルパス: {video_info.video_filepath}"
