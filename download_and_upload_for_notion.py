@@ -48,6 +48,7 @@ def download_file(url: str, output_dir: str = "~/Downloads") -> VideoInfo:
         "writethumbnail": True,
         "format": "bv[ext=mp4]+ba[ext=m4a]/bv+ba/best[ext=mp4]/best",
         "age_limit": 1985,
+        "cookies_from_browser": "safari",
     }
 
     try:
