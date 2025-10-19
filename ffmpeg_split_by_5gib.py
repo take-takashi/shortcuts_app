@@ -56,10 +56,12 @@ def main(argv=None) -> int:
             return 1
 
         # 分割するファイルサイズを定義
-        split_size = (5 * 1024**3) - (1024**2 * 1000)  # 5GiBとマージン
+        split_size = int(5 * 1024**3 - 1024**2)  # 5GiBとマージン
+
+        logger.info(f"split_size = {split_size}")
 
         MyFfmpegHelper.split_video_lossless_by_keyframes(
-            file, split_size_bytes=split_size
+            file, split_size_bytes=split_size, logger=logger
         )
 
         return 0

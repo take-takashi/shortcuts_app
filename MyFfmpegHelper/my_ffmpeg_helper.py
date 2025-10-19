@@ -115,12 +115,15 @@ class MyFfmpegHelper:
 
             return split_time_sec
 
-        except Exception as e:
-            raise Exception(f"エラーが発生しました: {e}")
+        except Exception:
+            raise
 
     @staticmethod
     def get_keyframes(
-        input_video: str, split_time_sec: float | None = None, read_duration: int = 10
+        input_video: str,
+        split_time_sec: float | None = None,
+        read_duration: int = 10,
+        logger: logging.Logger = logging.getLogger(__name__),
     ) -> list[float]:
         """
         指定された動画からキーフレームの秒数リストを取得する。
@@ -136,6 +139,8 @@ class MyFfmpegHelper:
             Exception: ffprobeの実行中にエラーが発生した場合。
         """
         try:
+            logger.info("MyFfmpegHelper.get_keyframes")
+
             cmd = [
                 "ffprobe",
                 "-v",
@@ -161,16 +166,35 @@ class MyFfmpegHelper:
             output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode(
                 "utf-8"
             )
-            keyframe_times = [
-                float(t.strip().rstrip(",")) for t in output.strip().splitlines()
+
+            logger.info(f"output = {output}")
+
+            # FFmpeg出力を行ごとに処理
+            # カンマで分割したトークンを前後の空白を落とす
+            # 空文字は弾いてリスト化
+            tokens = [
+                token.strip()
+                for line in output.strip().splitlines()
+                for token in line.split(",")
+                if token.strip()
             ]
+            # トークンがN/Aのものは要素削除
+            if tokens and tokens[-1].upper() == "N/A":
+                tokens.pop()
+            # 残った正常なトークンをfloatに変換
+            keyframe_times = [float(token) for token in tokens]
+
             return keyframe_times
 
-        except Exception as e:
-            raise Exception(f"エラーが発生しました: {e}")
+        except Exception:
+            raise
 
     @staticmethod
-    def get_split_keyframe_sec(input_video: str, split_sec: float) -> float:
+    def get_split_keyframe_sec(
+        input_video: str,
+        split_sec: float,
+        logger: logging.Logger = logging.getLogger(__name__),
+    ) -> float:
         """
         指定された秒数 `split_sec` の直前のキーフレームの秒数を取得します。
 
@@ -185,16 +209,21 @@ class MyFfmpegHelper:
             Exception: キーフレームの取得中にエラーが発生した場合。
         """
         try:
+            logger.info("MyFfmpegHelper.get_split_keyframe_sec")
+
             # 分割したい秒数より直前のキーフレームリストを取得する
             keyframes = MyFfmpegHelper.get_keyframes(input_video, split_sec, 10)
+
+            for keyframe in keyframes:
+                logger.info(f"keyframe = {keyframe}")
 
             # split_secに最も近いキーフレームを探す
             closest_keyframe_sec = min(keyframes, key=lambda x: abs(x - split_sec))
 
             return closest_keyframe_sec
 
-        except Exception as e:
-            raise Exception(f"エラーが発生しました: {e}")
+        except Exception:
+            raise
 
     @staticmethod
     def get_split_points_by_size(
@@ -221,7 +250,9 @@ class MyFfmpegHelper:
 
     @staticmethod
     def get_split_keyframe_sec_by_size(
-        input_video: str, split_size_bytes: int = 5 * 1024**3
+        input_video: str,
+        split_size_bytes: int = 5 * 1024**3,
+        logger: logging.Logger = logging.getLogger(__name__),
     ) -> list[float]:
         """
         動画を指定されたサイズで分割するためのキーフレーム分割点を計算します。
@@ -240,10 +271,14 @@ class MyFfmpegHelper:
         split_points = MyFfmpegHelper.get_split_points_by_size(
             input_video, split_size_bytes
         )
+
+        for split_point in split_points:
+            logger.info(f"split_point = {split_point}")
+
         # 分割する秒数リストから、それぞれ一番手前のキーフレームの秒数に変換
         for i, split_point in enumerate(split_points):
             split_points[i] = MyFfmpegHelper.get_split_keyframe_sec(
-                input_video, split_point
+                input_video, split_point, logger=logger
             )
 
         return split_points
@@ -284,8 +319,8 @@ class MyFfmpegHelper:
             )
 
             return output
-        except Exception as e:
-            raise Exception(f"エラーが発生しました: {e}")
+        except Exception:
+            raise
 
     @staticmethod
     def is_video(file_path: str) -> bool:
@@ -325,6 +360,7 @@ class MyFfmpegHelper:
         input_video: str,
         output_dir: str | None = None,
         split_size_bytes: int = 5 * 1024**3,
+        logger: logging.Logger = logging.getLogger(__name__),
     ) -> list[str]:
         """
         無劣化で動画をキーフレーム単位に分割する。
@@ -341,15 +377,27 @@ class MyFfmpegHelper:
             Exception: 分割中にエラーが発生した場合。
         """
         try:
+            logger.info("MyFfmpegHelper.split_video_lossless_by_keyframes")
+            logger.info(f"input_video =  {input_video}")
+
             if output_dir is None:
                 output_dir = os.path.dirname(input_video)
+
+            logger.info(f"output_dir = {output_dir}")
 
             os.makedirs(output_dir, exist_ok=True)
 
             duration = MyFfmpegHelper.get_duration_sec(input_video)
+
+            logger.info(f"dulation = {duration}")
+
             keyframes = MyFfmpegHelper.get_split_keyframe_sec_by_size(
-                input_video, split_size_bytes
+                input_video, split_size_bytes, logger=logger
             )
+
+            for keyframe in keyframes:
+                logger.info(f"keyframe = {keyframe}")
+
             # 開始点と終了点を追加（分割に活用）
             keyframes = [0.0] + keyframes + [duration]
 
@@ -384,8 +432,8 @@ class MyFfmpegHelper:
 
             return output_files
 
-        except Exception as e:
-            raise Exception(f"エラーが発生しました: {e}")
+        except Exception:
+            raise
 
     @staticmethod
     def is_vbr(input_video: str, sample_duration: int = 10) -> bool:

@@ -501,9 +501,11 @@ class MyNotionHelper:
             except Exception as e:
                 # プロパティへの添付に失敗した場合はログに記録しますが、ページへの添付は成功しているため処理を続行
                 self.logger.warning(f"Failed to attach file to property: {e}")
+                raise
 
         except Exception as e:
-            raise Exception(f"Notionへのアップロードに失敗しました: {e}")
+            self.logger.error(f"Notionへのアップロードに失敗しました: {e}")
+            raise
 
     def add_music_info_to_db(
         self, metadata: dict, file_path: str, database_id: str, tags_database_id: str

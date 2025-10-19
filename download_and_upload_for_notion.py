@@ -1,13 +1,12 @@
+import json
 import os
+import subprocess
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
-from yt_dlp import YoutubeDL
 
 from MyLoggerHelper import MyLoggerHelper
 from MyNotionHelper import MyNotionHelper
-
-from typing import Any, cast
 
 # ===== Config Begin ==========================================================
 # .envを読み込む
@@ -31,70 +30,87 @@ class VideoInfo:
         video_title (str): 動画のタイトル。
         video_filepath (str): 動画ファイルのパス。
         thumbnail_filepath (str): サムネイル画像のファイルパス。
+        ext (str): 動画の拡張子。
     """
 
     video_title: str
     video_filepath: str
     thumbnail_filepath: str
+    ext: str
 
 
 # 動画ファイル、サムネイルファイルをダウンロードして情報を返す関数
-def download_file(url: str, output_dir: str = "~/Downloads") -> VideoInfo:
-    outtmpl = f"{output_dir}/%(title)s.%(ext)s"
+def download_file(url: str, output_dir: str = "~/Downloads") -> list[VideoInfo]:
+    output_dir = os.path.expanduser(output_dir)
 
-    ydl_opts = {
-        "outtmpl": outtmpl,
-        "trim_file_name": 95,
-        "writethumbnail": True,
-        "format": "bv[ext=mp4]+ba[ext=m4a]/bv+ba/best[ext=mp4]/best",
-        "age_limit": 1985,
-        "cookies_from_browser": "safari",
-    }
+    ytdlp_cmd = [
+        "yt-dlp",
+        "--no-simulate",
+        "-f",
+        "bv[ext=mp4]+ba[ext=m4a]/bv+ba/best[ext=mp4]/best",
+        "--write-thumbnail",
+        "--embed-thumbnail",
+        "--convert-thumbnails",
+        "jpg",
+        "--trim-filename",
+        "95",
+        "--cookies-from-browser",
+        "safari",
+        "--age-limit",
+        "1985",
+        "--paths",
+        output_dir,
+        "-o",
+        "%(title)s.%(ext)s",
+        # "-o",
+        # "thumbnail:%(title)s",
+        "--print",
+        'before_dl:{"event":"meta","id":"%(id)s","title":"%(title)s"}',
+        "--print",
+        'after_move:{"event":"done","video_path":"%(filepath)s","video_name":"%(filename)s","thumb_path":"%(filepath)s.jpg", "ext":"%(ext)s"}',
+        url,
+    ]
 
     try:
-        with YoutubeDL(cast(Any, ydl_opts)) as ydl:
-            # 動画のダウンロード
-            info = ydl.extract_info(url, download=True)
+        res = subprocess.run(ytdlp_cmd, capture_output=True, text=True, check=True)
+        video_path = thumb_path = title = ext = None
 
-            # 動画のダウンロードに失敗した場合
-            if info is None:
-                raise Exception("動画のダウンロードに失敗しました。")
+        # logger.info(res.stdout)
 
-            video_title = info.get("title")
-            video_filepath = ydl.prepare_filename(info)
+        videos: list[VideoInfo] = []
 
-            # サムネイルファイルパスを探す
-            thumbnail_filepath = None
-            for thumb in info.get("thumbnails", []):
-                if "filepath" in thumb:
-                    thumbnail_filepath = thumb["filepath"]
-                    break
+        for line in res.stdout.splitlines():
+            if not line.strip().startswith("{"):
+                continue
+            obj = json.loads(line)
+            if obj.get("event") == "meta":
+                title = obj["title"]
+            elif obj.get("event") == "done":
+                video_path = obj["video_path"]
+                video_name = obj["video_name"]
+                thumb_path = obj["thumb_path"]
+                ext = obj["ext"]
+                # meta -> done の順に書き込まれる前提の動き
+                title = title if title else video_name
+                videos.append(VideoInfo(title, video_path, thumb_path, ext))
+        # jsonの分解 -> VideoInfo作成終了
 
-            return VideoInfo(
-                video_title=video_title or "",
-                video_filepath=video_filepath or "",
-                thumbnail_filepath=thumbnail_filepath or "",
-            )
+        # ダウンロードしたそれぞれの動画、サムネイルに対する処理
+        for video in videos:
+            # yt-dlpでサムネイルファイルの扱いがうまくいかないので手動で置き換える
+            thumb_path = video.thumbnail_filepath
+            ext = f".{video.ext}.jpg"
+            thumb_path = f"{thumb_path[: -len(ext)]}.jpg"
 
+            # VideoInfoの修正
+            video.thumbnail_filepath = thumb_path
+
+        return videos
+
+    except subprocess.CalledProcessError as e:
+        raise Exception(f"yt-dlpの実行に失敗しました: {e.stderr}")
     except Exception as e:
         raise Exception(f"URL「{url}」の動画のダウンロードに失敗しました: {e}")
-
-
-# ファイルパスの拡張子が.imageの場合、.jpgに名称変更する関数
-def rename_image2jpg_extension(filepath: str) -> str:
-    """
-    指定されたファイルパスの拡張子が.imageの場合、.jpgに変更します。
-    Args:
-        filepath (str): 変更対象のファイルパス。
-    Returns:
-        str: 拡張子を変更した新しいファイルパス。
-    """
-    if filepath.endswith(".image"):
-        new_filepath = filepath[:-6] + ".jpg"
-        os.rename(filepath, new_filepath)
-        # log(f"✅ 拡張子が「.image」だったのでファイル名を変更しました: {filepath} -> {new_filepath}")
-        return new_filepath
-    return filepath
 
 
 # ======== Entry Point ========================================================
@@ -135,71 +151,75 @@ def main():
             logger.info(f"▶ URL「{url}」の動画をダウンロード中...")
 
             try:
-                video_info: VideoInfo = download_file(url)
+                video_infos: list[VideoInfo] = download_file(url)
             except Exception as e:
                 logger.error(f"URL「{url}」の動画のダウンロードに失敗しました: {e}")
                 continue
 
-            logger.info(f"ダウンロードした動画のタイトル: {video_info.video_title}")
-            logger.info(
-                f"ダウンロードした動画のファイルパス: {video_info.video_filepath}"
-            )
-            logger.info(
-                f"ダウンロードしたサムネイルのファイルパス: {video_info.thumbnail_filepath}"
-            )
+            for video_info in video_infos:
+                logger.info(f"ダウンロードした動画のタイトル: {video_info.video_title}")
+                logger.info(
+                    f"ダウンロードした動画のファイルパス: {video_info.video_filepath}"
+                )
+                logger.info(
+                    f"ダウンロードしたサムネイルのファイルパス: {video_info.thumbnail_filepath}"
+                )
             logger.info(f"✅ URL「{url}」のダウンロードが完了しました。")
 
             # ダウンロードが完了したらNotionのページ内のコンテンツを削除
             # Xからのダウンロードはコンテンツを削除しないようにする
-            if url.startswith("https://x.com/"):
-                logger.info(
-                    f"⚠️ URL「{url}」はXからのダウンロードのため、コンテンツを削除しません。"
-                )
-            else:
-                logger.info(
-                    f"▶ アイテムID「{item['id']}」のページコンテンツを削除中..."
-                )
-                notion.delete_page_content(item["id"])
-                logger.info(
-                    f"✅ アイテムID「{item['id']}」のページコンテンツを削除しました。"
-                )
-            # end if
+            try:
+                if url.startswith("https://x.com/"):
+                    logger.info(
+                        f"⚠️ URL「{url}」はXからのダウンロードのため、コンテンツを削除しません。"
+                    )
+                else:
+                    logger.info(
+                        f"▶ アイテムID「{item['id']}」のページコンテンツを削除中..."
+                    )
+                    notion.delete_page_content(item["id"])
+                    logger.info(
+                        f"✅ アイテムID「{item['id']}」のページコンテンツを削除しました。"
+                    )
+                # end if
+            except Exception as e:
+                logger.error(e)
+                continue
 
-            # ダウンロードが完了したらNotionのページタイトルを動画のタイトルに変更
-            logger.info("▶ ページタイトルを変更中...")
-            notion.change_page_title(item["id"], video_info.video_title)
-            logger.info(
-                f"✅ ページタイトルを「{video_info.video_title}」に変更しました。"
-            )
+            # ダウンロードした動画ごとの処理
+            try:
+                for video_info in video_infos:
+                    # ダウンロードが完了したらNotionのページタイトルを動画のタイトルに変更
+                    logger.info("▶ ページタイトルを変更中...")
+                    notion.change_page_title(item["id"], video_info.video_title)
+                    logger.info(
+                        f"✅ ページタイトルを「{video_info.video_title}」に変更しました。"
+                    )
 
-            # ファイルがダウンロードできたら、Notionに動画をアップロード
-            logger.info(
-                f"▶ ファイル「{video_info.video_filepath}」の動画をNotionにアップロード中..."
-            )
-            notion.upload_file(item["id"], video_info.video_filepath)
-            logger.info(
-                f"✅ ファイル「{video_info.video_filepath}」の動画のアップロードが完了しました。"
-            )
+                    # ファイルがダウンロードできたら、Notionに動画をアップロード
+                    logger.info(
+                        f"▶ ファイル「{video_info.video_filepath}」の動画をNotionにアップロード中..."
+                    )
+                    # notion.upload_file(item["id"], video_info.video_filepath)
+                    # 試しに動画を分割してアップロードできる版にしてみる
+                    notion.upload_video(item["id"], video_info.video_filepath)
+                    logger.info(
+                        f"✅ ファイル「{video_info.video_filepath}」の動画のアップロードが完了しました。"
+                    )
 
-            # サムネイルの拡張子が.imageなら.jpgに変更
-            logger.info(
-                f"▶ ファイル「{video_info.thumbnail_filepath}」のサムネイルの拡張子を確認中..."
-            )
-            video_info.thumbnail_filepath = rename_image2jpg_extension(
-                video_info.thumbnail_filepath
-            )
-            logger.info(
-                f"✅ ファイル「{video_info.thumbnail_filepath}」のサムネイルの拡張子を確認・変更しました。"
-            )
-
-            # 動画のアップロードの次に画像を添付する
-            logger.info(
-                f"▶ アイテムID「{item['id']}」のサムネイルをNotionにアップロード中..."
-            )
-            notion.upload_file(item["id"], video_info.thumbnail_filepath)
-            logger.info(
-                f"✅ アイテムID「{item['id']}」のサムネイルのアップロードが完了しました。"
-            )
+                    # 動画のアップロードの次に画像を添付する
+                    logger.info(
+                        f"▶ アイテムID「{item['id']}」のサムネイルをNotionにアップロード中..."
+                    )
+                    notion.upload_file(item["id"], video_info.thumbnail_filepath)
+                    logger.info(
+                        f"✅ アイテムID「{item['id']}」のサムネイルのアップロードが完了しました。"
+                    )
+                # end for
+            except Exception:
+                # logger.error(e)
+                logger.exception
+                continue
 
             # アイテムのプロパティ「処理済」をチェックにする
             logger.info(
