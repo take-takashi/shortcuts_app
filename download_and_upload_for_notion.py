@@ -45,6 +45,7 @@ def download_file(url: str, output_dir: str = "~/Downloads") -> list[VideoInfo]:
 
     ytdlp_cmd = [
         "yt-dlp",
+        # "--verbose", # 詳細ログ調査用
         "--no-simulate",
         "-f",
         "bv[ext=mp4]+ba[ext=m4a]/bv+ba/best[ext=mp4]/best",
@@ -108,9 +109,11 @@ def download_file(url: str, output_dir: str = "~/Downloads") -> list[VideoInfo]:
         return videos
 
     except subprocess.CalledProcessError as e:
-        raise Exception(f"yt-dlpの実行に失敗しました: {e.stderr}")
-    except Exception as e:
-        raise Exception(f"URL「{url}」の動画のダウンロードに失敗しました: {e}")
+        logger.error("yt-dlp stdout:\n%s", e.stdout)
+        logger.error("yt-dlp stderr:\n%s", e.stderr)
+        raise
+    except Exception:
+        raise
 
 
 # ======== Entry Point ========================================================
