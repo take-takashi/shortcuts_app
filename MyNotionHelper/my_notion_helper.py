@@ -513,6 +513,7 @@ class MyNotionHelper:
         """
         取得したメタデータをNotionデータベースに追加し、関連ファイルをアップロードします。
         """
+        self.logger.info(__name__)
 
         # アルバムのリレーションIDを取得（なければ作成）
         album_id = self.get_or_create_tag_page(

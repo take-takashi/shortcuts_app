@@ -54,7 +54,7 @@ def download_file(url: str, output_dir: str = "~/Downloads") -> list[VideoInfo]:
         "--convert-thumbnails",
         "jpg",
         "--trim-filename",
-        "95",
+        "80",
         "--cookies-from-browser",
         "safari",
         "--age-limit",
@@ -199,7 +199,16 @@ def main():
                         f"✅ ページタイトルを「{video_info.video_title}」に変更しました。"
                     )
 
-                    # ファイルがダウンロードできたら、Notionに動画をアップロード
+                    # 先にサムネイルを添付する
+                    logger.info(
+                        f"▶ アイテムID「{item['id']}」のサムネイルをNotionにアップロード中..."
+                    )
+                    notion.upload_file(item["id"], video_info.thumbnail_filepath)
+                    logger.info(
+                        f"✅ アイテムID「{item['id']}」のサムネイルのアップロードが完了しました。"
+                    )
+
+                    # その後に動画をアップロードする
                     logger.info(
                         f"▶ ファイル「{video_info.video_filepath}」の動画をNotionにアップロード中..."
                     )
@@ -208,15 +217,6 @@ def main():
                     notion.upload_video(item["id"], video_info.video_filepath)
                     logger.info(
                         f"✅ ファイル「{video_info.video_filepath}」の動画のアップロードが完了しました。"
-                    )
-
-                    # 動画のアップロードの次に画像を添付する
-                    logger.info(
-                        f"▶ アイテムID「{item['id']}」のサムネイルをNotionにアップロード中..."
-                    )
-                    notion.upload_file(item["id"], video_info.thumbnail_filepath)
-                    logger.info(
-                        f"✅ アイテムID「{item['id']}」のサムネイルのアップロードが完了しました。"
                     )
                 # end for
             except Exception:
