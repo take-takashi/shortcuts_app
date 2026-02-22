@@ -5,8 +5,26 @@ import re
 import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta, timezone
 
 from bs4 import BeautifulSoup
+
+
+JST = timezone(timedelta(hours=9))
+
+
+def _format_broadcast_date(value: str) -> str:
+    """日時文字列をJST日付(YYYYMMDD)に変換する"""
+    if not value:
+        return ""
+
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(JST).strftime("%Y%m%d")
+    except ValueError:
+        return ""
 
 
 # --- 型定義 ---
@@ -19,6 +37,7 @@ class AudioInfo:
     artist_name: str
     cover_image_url: str
     audio_src: str
+    broadcast_date: str = ""
 
 
 class AudioInfoExtractorBase(ABC):
@@ -117,6 +136,9 @@ class AudeeInfoExtractor(AudioInfoExtractorBase):
             for audio_data in audio_data_list:
                 episode_title = audio_data.get("name", "")
                 audio_src = audio_data.get("contentUrl", "")
+                broadcast_date = _format_broadcast_date(
+                    str(audio_data.get("uploadDate") or audio_data.get("datePublished") or "")
+                )
 
                 if not audio_src:
                     self.logger.warning(
@@ -131,6 +153,7 @@ class AudeeInfoExtractor(AudioInfoExtractorBase):
                         artist_name=artist_name,
                         cover_image_url=cover_image_url,
                         audio_src=audio_src,
+                        broadcast_date=broadcast_date,
                     )
                 )
 
@@ -224,10 +247,84 @@ class BitfanInfoExtractor(AudioInfoExtractorBase):
             return None
 
 
+class OmnyInfoExtractor(AudioInfoExtractorBase):
+    """omny.fmの音声情報抽出クラス"""
+
+    def get_audio_info(self, html_content: str) -> list[AudioInfo] | None:
+        self.logger.info("omny.fmのメタデータと音声URLを解析します...")
+        try:
+            soup = BeautifulSoup(html_content, "html.parser")
+
+            # Next.jsの埋め込みデータからクリップ情報を取得
+            next_data_elem = soup.find("script", id="__NEXT_DATA__")
+            if not next_data_elem:
+                self.logger.warning("__NEXT_DATA__が見つかりませんでした。")
+                return None
+
+            next_data_text = next_data_elem.get_text()
+            if not next_data_text:
+                self.logger.warning("__NEXT_DATA__の内容が空でした。")
+                return None
+
+            try:
+                next_data = json.loads(next_data_text)
+            except json.JSONDecodeError as e:
+                self.logger.warning(
+                    f"__NEXT_DATA__の厳密JSON解析に失敗したため、緩和モードで再試行します: {e}"
+                )
+                next_data = json.loads(next_data_text, strict=False)
+            page_props = next_data.get("props", {}).get("pageProps", {})
+
+            # 通常ページは pageProps.clip に対象エピソードが入る
+            clip = page_props.get("clip")
+            if not isinstance(clip, dict):
+                self.logger.warning("clip情報が見つかりませんでした。")
+                return None
+
+            program = clip.get("Program", {}) if isinstance(clip.get("Program"), dict) else {}
+
+            program_name = str(program.get("Name") or "")
+            episode_title = str(clip.get("Title") or "")
+            artist_name = str(program.get("Author") or program_name)
+            cover_image_url = str(clip.get("ImageUrl") or "")
+            audio_src = str(clip.get("AudioUrl") or "")
+            broadcast_date = _format_broadcast_date(
+                str(clip.get("PublishedUtc") or "")
+            )
+
+            # フォールバック: og:image からカバー画像を補完
+            if not cover_image_url:
+                cover_image_elem = soup.select_one("meta[property='og:image']")
+                if cover_image_elem and cover_image_elem.has_attr("content"):
+                    cover_image_url = str(cover_image_elem["content"])
+
+            if not audio_src:
+                self.logger.warning("音声URLが見つかりませんでした。")
+                return None
+
+            return [
+                AudioInfo(
+                    program_name=program_name,
+                    episode_title=episode_title,
+                    artist_name=artist_name,
+                    cover_image_url=cover_image_url,
+                    audio_src=audio_src,
+                    broadcast_date=broadcast_date,
+                )
+            ]
+        except json.JSONDecodeError as e:
+            self.logger.error(f"omny.fmのJSON解析に失敗しました: {e}", exc_info=True)
+            return None
+        except Exception as e:
+            self.logger.error(f"omny.fmのHTML解析に失敗しました: {e}", exc_info=True)
+            return None
+
+
 # --- ドメインとExtractorのマッピング ---
 EXTRACTOR_MAP = {
     "audee.jp": AudeeInfoExtractor,
     "ij-matome.bitfan.id": BitfanInfoExtractor,
+    "omny.fm": OmnyInfoExtractor,
 }
 
 

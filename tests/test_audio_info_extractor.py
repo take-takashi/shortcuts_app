@@ -8,6 +8,7 @@ from AudioInfoExtractor import (
     AudeeInfoExtractor,
     AudioInfo,
     BitfanInfoExtractor,
+    OmnyInfoExtractor,
     get_extractor,
 )
 
@@ -45,6 +46,7 @@ def test_audee_info_extractor(mock_logger):
         assert audio_info.artist_name is not None
         assert audio_info.cover_image_url is not None
         assert audio_info.audio_src is not None
+        assert audio_info.broadcast_date == "20220709"
 
         # 取得したHTMLによって取得できるタイトルなどが異なるため、print目視とする
         logger.info(f"program_name: {audio_info.program_name}")
@@ -95,5 +97,32 @@ def test_get_extractor(mock_logger):
     bitfan_extractor = get_extractor("ij-matome.bitfan.id", mock_logger)
     assert isinstance(bitfan_extractor, BitfanInfoExtractor)
 
+    omny_extractor = get_extractor("omny.fm", mock_logger)
+    assert isinstance(omny_extractor, OmnyInfoExtractor)
+
     unknown_extractor = get_extractor("unknown.com", mock_logger)
     assert unknown_extractor is None
+
+
+def test_omny_info_extractor(mock_logger):
+    html_path = os.path.join(
+        os.path.dirname(__file__), "private_data", "page_omny_fm.html"
+    )
+
+    html = open(html_path, "r", encoding="utf-8").read()
+
+    extractor = OmnyInfoExtractor(mock_logger)
+    audio_infos = extractor.get_audio_info(html)
+
+    if audio_infos is None:
+        pytest.fail("audio_infosが取得できませんでした。")
+
+    assert len(audio_infos) == 1
+    audio_info = audio_infos[0]
+    assert isinstance(audio_info, AudioInfo)
+    assert audio_info.program_name != ""
+    assert audio_info.episode_title != ""
+    assert audio_info.artist_name != ""
+    assert audio_info.cover_image_url.startswith("http")
+    assert "traffic.omny.fm" in audio_info.audio_src
+    assert audio_info.broadcast_date == "20260222"

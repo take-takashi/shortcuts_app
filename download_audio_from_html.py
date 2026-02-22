@@ -40,7 +40,12 @@ def download_audio_from_html(html_path, domain, download_dir, *, logger):
             sanitized_program = MyPathHelper.sanitize_filepath(audio_info.program_name)
             sanitized_episode = MyPathHelper.sanitize_filepath(audio_info.episode_title)
             temp_filename = "temp_audio.mp3"
-            final_filename = f"{sanitized_program}_{sanitized_episode}.mp3"
+            if audio_info.broadcast_date:
+                final_filename = (
+                    f"{sanitized_program}_{audio_info.broadcast_date}_{sanitized_episode}.mp3"
+                )
+            else:
+                final_filename = f"{sanitized_program}_{sanitized_episode}.mp3"
             temp_filepath = os.path.join(download_dir, temp_filename)
             final_filepath = os.path.join(download_dir, final_filename)
 
