@@ -320,11 +320,86 @@ class OmnyInfoExtractor(AudioInfoExtractorBase):
             return None
 
 
+class JfnPodsInfoExtractor(AudioInfoExtractorBase):
+    """jfn-pods.comの音声情報抽出クラス"""
+
+    def get_audio_info(self, html_content: str) -> list[AudioInfo] | None:
+        self.logger.info("jfn-pods.comのメタデータと音声URLを解析します...")
+        try:
+            soup = BeautifulSoup(html_content, "html.parser")
+
+            # プレイヤーの埋め込み属性から音声情報を取得する
+            voice_player = soup.select_one("div.voice-player")
+            audio_src = ""
+            episode_title = ""
+            if voice_player:
+                audio_src = str(voice_player.get("data-audio-url") or "")
+                episode_title = str(voice_player.get("data-episode-name") or "")
+
+            # フォールバックとしてaudio要素のsourceも確認する
+            if not audio_src:
+                source_elem = soup.select_one("audio source")
+                if source_elem and source_elem.has_attr("src"):
+                    audio_src = str(source_elem["src"])
+
+            # メタタグと見出しから番組情報を取得する
+            program_name = ""
+            program_name_elem = soup.select_one("div.mt-24.font-semibold")
+            if program_name_elem:
+                program_name = program_name_elem.get_text(strip=True)
+
+            if not program_name:
+                og_title_elem = soup.select_one("meta[property='og:title']")
+                if og_title_elem and og_title_elem.has_attr("content"):
+                    og_title = str(og_title_elem["content"])
+                    title_parts = [part.strip() for part in og_title.split("｜") if part.strip()]
+                    if len(title_parts) >= 2:
+                        program_name = title_parts[1]
+
+            if not episode_title:
+                heading_elem = soup.select_one("h1")
+                if heading_elem:
+                    episode_title = heading_elem.get_text(strip=True)
+
+            artist_name = program_name
+
+            cover_image_url = ""
+            cover_image_elem = soup.select_one("meta[property='og:image']")
+            if cover_image_elem and cover_image_elem.has_attr("content"):
+                cover_image_url = str(cover_image_elem["content"])
+
+            datetime_elem = soup.select_one("time[datetime]")
+            broadcast_date = _format_broadcast_date(
+                str(datetime_elem.get("datetime") or "") if datetime_elem else ""
+            )
+
+            if not audio_src:
+                self.logger.warning("音声URLが見つかりませんでした。")
+                return None
+
+            return [
+                AudioInfo(
+                    program_name=program_name,
+                    episode_title=episode_title,
+                    artist_name=artist_name,
+                    cover_image_url=cover_image_url,
+                    audio_src=audio_src,
+                    broadcast_date=broadcast_date,
+                )
+            ]
+        except Exception as e:
+            self.logger.error(
+                f"jfn-pods.comのHTML解析に失敗しました: {e}", exc_info=True
+            )
+            return None
+
+
 # --- ドメインとExtractorのマッピング ---
 EXTRACTOR_MAP = {
     "audee.jp": AudeeInfoExtractor,
     "ij-matome.bitfan.id": BitfanInfoExtractor,
     "omny.fm": OmnyInfoExtractor,
+    "jfn-pods.com": JfnPodsInfoExtractor,
 }
 
 

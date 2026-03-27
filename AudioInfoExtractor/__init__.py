@@ -2,6 +2,7 @@ from .audio_info_extractor import (
     AudeeInfoExtractor,
     AudioInfo,
     BitfanInfoExtractor,
+    JfnPodsInfoExtractor,
     OmnyInfoExtractor,
     get_extractor,
 )
@@ -9,6 +10,7 @@ from .audio_info_extractor import (
 __all__ = [
     "AudeeInfoExtractor",
     "BitfanInfoExtractor",
+    "JfnPodsInfoExtractor",
     "OmnyInfoExtractor",
     "AudioInfo",
     "get_extractor",
