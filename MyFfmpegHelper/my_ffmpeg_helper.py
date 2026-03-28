@@ -16,6 +16,46 @@ class FfmpegMetadata(TypedDict, total=False):
 
 class MyFfmpegHelper:
     @staticmethod
+    def normalize_cover_image_for_mp3(
+        cover_path: str,
+        logger: logging.Logger | None = None,
+    ) -> str:
+        """
+        MP3 に埋め込める JPEG カバー画像を生成し、そのパスを返す。
+
+        Args:
+            cover_path (str): 元のカバー画像パス。
+            logger (optional): ロガーオブジェクト。Defaults to None.
+
+        Returns:
+            str: JPEG に正規化されたカバー画像パス。
+        """
+        normalized_cover_path = f"{cover_path}.mp3_cover.jpg"
+
+        try:
+            if logger:
+                logger.info("MP3埋め込み用にカバー画像をJPEGへ正規化しています...")
+
+            cmd = [
+                "ffmpeg",
+                "-i",
+                cover_path,
+                "-frames:v",
+                "1",
+                "-c:v",
+                "mjpeg",
+                "-y",
+                normalized_cover_path,
+            ]
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            return normalized_cover_path
+        except subprocess.CalledProcessError as e:
+            if logger:
+                logger.error(f"カバー画像の変換に失敗しました: {e}")
+                logger.error(f"ffmpeg stderr: {e.stderr}")
+            raise Exception(f"カバー画像の変換に失敗しました: {e.stderr}") from e
+
+    @staticmethod
     def get_audio_metadata(file_path: str) -> dict | None:
         """
         ffmpegを使って音声ファイルのメタデータを取得する
@@ -525,6 +565,7 @@ class MyFfmpegHelper:
         Raises:
             Exception: ffmpegの実行中にエラーが発生した場合。
         """
+        normalized_cover_path = None
         try:
             if logger:
                 log_msg = "ffmpegを使用してメタデータ"
@@ -537,9 +578,29 @@ class MyFfmpegHelper:
             cmd = ["ffmpeg", "-i", input_path]
 
             if cover_path:
-                cmd.extend(["-i", cover_path, "-map", "0", "-map", "1"])
-
-            cmd.extend(["-c", "copy"])
+                normalized_cover_path = MyFfmpegHelper.normalize_cover_image_for_mp3(
+                    cover_path, logger=logger
+                )
+                cmd.extend(
+                    [
+                        "-i",
+                        normalized_cover_path,
+                        "-map",
+                        "0:a:0",
+                        "-map",
+                        "1:v:0",
+                        "-c:a",
+                        "copy",
+                        "-c:v",
+                        "mjpeg",
+                        "-id3v2_version",
+                        "3",
+                        "-disposition:v:0",
+                        "attached_pic",
+                    ]
+                )
+            else:
+                cmd.extend(["-c", "copy"])
 
             for key, value in metadata.items():
                 if value:  # 値が空でない場合のみ追加
@@ -553,11 +614,18 @@ class MyFfmpegHelper:
                 logger.info("ffmpeg処理が完了しました。")
 
         except subprocess.CalledProcessError as e:
+            if os.path.exists(output_path):
+                os.remove(output_path)
             if logger:
                 logger.error(f"ffmpegの実行に失敗しました: {e}")
                 logger.error(f"ffmpeg stderr: {e.stderr}")
             raise Exception(f"ffmpegの実行に失敗しました: {e.stderr}") from e
         except Exception as e:
+            if os.path.exists(output_path):
+                os.remove(output_path)
             if logger:
                 logger.error(f"予期せぬエラーが発生しました: {e}", exc_info=True)
             raise
+        finally:
+            if normalized_cover_path and os.path.exists(normalized_cover_path):
+                os.remove(normalized_cover_path)

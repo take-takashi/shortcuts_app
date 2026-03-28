@@ -1,4 +1,6 @@
 import os
+import subprocess
+import tempfile
 
 import pytest
 
@@ -71,3 +73,73 @@ def test_get_audio_metadata():
     assert actual_metadata.get("track") == expected_metadata["track"]
     assert actual_metadata.get("date") == expected_metadata["date"]
     assert actual_metadata.get("genre") == expected_metadata["genre"]
+
+
+def test_embed_metadata_with_avif_cover():
+    """AVIFカバー画像付きでもMP3へ正常に埋め込めることをテスト"""
+    audio_file_path = "./tests/sample.mp3"
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        cover_path = os.path.join(temp_dir, "cover.avif")
+        output_path = os.path.join(temp_dir, "output.mp3")
+
+        # AVIFのカバー画像を動的生成する
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:s=32x32:d=1",
+                "-frames:v",
+                "1",
+                "-c:v",
+                "libsvtav1",
+                "-f",
+                "avif",
+                "-y",
+                cover_path,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        MyFfmpegHelper.embed_metadata(
+            input_path=audio_file_path,
+            output_path=output_path,
+            metadata={
+                "title": "AVIF付きタイトル",
+                "artist": "AVIF付きアーティスト",
+                "album": "AVIF付きアルバム",
+            },
+            cover_path=cover_path,
+        )
+
+        assert os.path.exists(output_path)
+        assert os.path.getsize(output_path) > 10 * 1024
+
+        metadata = MyFfmpegHelper.get_audio_metadata(output_path)
+        assert metadata is not None
+        assert metadata.get("title") == "AVIF付きタイトル"
+        assert metadata.get("artist") == "AVIF付きアーティスト"
+        assert metadata.get("album") == "AVIF付きアルバム"
+
+        probe = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "stream=codec_type:stream_disposition=attached_pic",
+                "-of",
+                "default=noprint_wrappers=1",
+                output_path,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert "codec_type=audio" in probe.stdout
+        assert "codec_type=video" in probe.stdout
+        assert "attached_pic=1" in probe.stdout
