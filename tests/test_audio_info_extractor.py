@@ -132,6 +132,65 @@ def test_omny_info_extractor(mock_logger):
     assert audio_info.broadcast_date == "20260222"
 
 
+def test_omny_info_extractor_uses_next_data_with_clip(mock_logger):
+    html = """
+    <!doctype html>
+    <html>
+      <head>
+        <meta property="og:image" content="https://example.com/fallback.jpg" />
+      </head>
+      <body>
+        <script id="__NEXT_DATA__" type="application/json">
+          {
+            "props": {
+              "pageProps": {
+                "type": "notFound",
+                "program": {
+                  "Name": "先頭の番組"
+                }
+              }
+            }
+          }
+        </script>
+        <script id="__NEXT_DATA__" type="application/json">
+          {
+            "props": {
+              "pageProps": {
+                "type": "success",
+                "clip": {
+                  "Title": "第86杯目 あくまでもエンターテイメントですから",
+                  "AudioUrl": "https://traffic.omny.fm/example/audio.mp3",
+                  "ImageUrl": "https://www.omnycontent.com/example/image.jpg",
+                  "PublishedUtc": "2026-06-21T09:00:00Z",
+                  "Program": {
+                    "Name": "佐藤栞里 さとしおあちぇとぺぺ",
+                    "Author": "ニッポン放送"
+                  }
+                }
+              }
+            }
+          }
+        </script>
+      </body>
+    </html>
+    """
+
+    extractor = OmnyInfoExtractor(mock_logger)
+    audio_infos = extractor.get_audio_info(html)
+
+    if audio_infos is None:
+        pytest.fail("audio_infosが取得できませんでした。")
+
+    assert len(audio_infos) == 1
+    audio_info = audio_infos[0]
+    assert audio_info.program_name == "佐藤栞里 さとしおあちぇとぺぺ"
+    assert audio_info.episode_title == "第86杯目 あくまでもエンターテイメントですから"
+    assert audio_info.artist_name == "ニッポン放送"
+    assert audio_info.cover_image_url == "https://www.omnycontent.com/example/image.jpg"
+    assert audio_info.audio_src == "https://traffic.omny.fm/example/audio.mp3"
+    assert audio_info.broadcast_date == "20260621"
+
+
 def test_jfn_pods_info_extractor(mock_logger):
     html = """
     <!doctype html>

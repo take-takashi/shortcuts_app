@@ -255,28 +255,38 @@ class OmnyInfoExtractor(AudioInfoExtractorBase):
         try:
             soup = BeautifulSoup(html_content, "html.parser")
 
-            # Next.jsの埋め込みデータからクリップ情報を取得
-            next_data_elem = soup.find("script", id="__NEXT_DATA__")
-            if not next_data_elem:
+            # 保存されたHTMLには通常ページと埋め込みページのNext.jsデータが同居する場合があるため、
+            # HTMLパーサーに頼り切らず、生HTMLからclipを含むデータを明示的に選ぶ。
+            next_data_texts = re.findall(
+                r"""<script\b(?=[^>]*\bid=["']__NEXT_DATA__["'])[^>]*>(.*?)</script>""",
+                html_content,
+                re.DOTALL,
+            )
+            if not next_data_texts:
                 self.logger.warning("__NEXT_DATA__が見つかりませんでした。")
                 return None
 
-            next_data_text = next_data_elem.get_text()
-            if not next_data_text:
-                self.logger.warning("__NEXT_DATA__の内容が空でした。")
-                return None
+            clip = None
+            for next_data_text in next_data_texts:
+                if not next_data_text:
+                    continue
 
-            try:
-                next_data = json.loads(next_data_text)
-            except json.JSONDecodeError as e:
-                self.logger.warning(
-                    f"__NEXT_DATA__の厳密JSON解析に失敗したため、緩和モードで再試行します: {e}"
-                )
-                next_data = json.loads(next_data_text, strict=False)
-            page_props = next_data.get("props", {}).get("pageProps", {})
+                try:
+                    next_data = json.loads(next_data_text)
+                except json.JSONDecodeError as e:
+                    self.logger.warning(
+                        f"__NEXT_DATA__の厳密JSON解析に失敗したため、緩和モードで再試行します: {e}"
+                    )
+                    next_data = json.loads(next_data_text, strict=False)
 
-            # 通常ページは pageProps.clip に対象エピソードが入る
-            clip = page_props.get("clip")
+                page_props = next_data.get("props", {}).get("pageProps", {})
+
+                # 通常ページは pageProps.clip に対象エピソードが入る
+                candidate_clip = page_props.get("clip")
+                if isinstance(candidate_clip, dict):
+                    clip = candidate_clip
+                    break
+
             if not isinstance(clip, dict):
                 self.logger.warning("clip情報が見つかりませんでした。")
                 return None
