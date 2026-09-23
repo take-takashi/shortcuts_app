@@ -12,7 +12,7 @@ mise run install
 mise run build
 ```
 
-`ffmpeg`も必要です。
+音声は内蔵のM4A writerで保存するため、`ffmpeg`は不要です。
 
 ## 実行
 
@@ -41,7 +41,6 @@ pnpm run download --keywords "伊集院光" --date 20250630
 -k, --keywords <文字列>       検索語（|でOR検索）
 -d, --date <日付>             yesterday（既定）、today、またはYYYYMMDD
     --save-directory <パス>   保存先（既定: ~/Downloads）
-    --ffmpeg-path <パス>      ffmpegのパス（既定: ffmpeg）
     --exclude-stations <ID>   除外する放送局ID（カンマ区切り）
     --overwrite               既存ファイルを上書き
     --include-future          放送終了前の番組も対象にする
@@ -64,7 +63,6 @@ mise run download -- --keywords "伊集院光|サンドウィッチマン"
 RADIKO_KEYWORDS
 RADIKO_DATE
 RADIKO_SAVE_DIRECTORY
-RADIKO_FFMPEG_PATH
 RADIKO_EXCLUDE_STATION_IDS
 ```
 

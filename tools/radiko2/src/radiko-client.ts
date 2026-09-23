@@ -1,10 +1,10 @@
 import { writeFile, readFile, stat, mkdir, rm } from "fs/promises";
-import { join, extname } from "path";
-import { spawn } from "child_process";
+import { join } from "path";
 import { randomBytes } from "crypto";
 import { XMLParser } from "fast-xml-parser";
 import { tmpdir } from "os";
 import { logger } from "./logger";
+import { writeM4aFromAdtsFiles, type M4aCover, type M4aMetadata } from "./m4a-writer";
 
 /**
  * 放送局情報を表すインターフェース。
@@ -50,8 +50,6 @@ export class RadikoClient {
   private authToken: string | null = null;
   /** 認証後に取得するエリアコード */
   private areaCode: string | null = null;
-  /** ffmpegコマンドのパス */
-  private ffmpegPath: string;
   /** 番組表XMLのキャッシュを保存するディレクトリ */
   private cacheDir: string;
 
@@ -67,12 +65,49 @@ export class RadikoClient {
     return "";
   }
 
+  private static detectCoverMimeType(
+    data: Uint8Array,
+    contentType: string | null,
+    imageUrl: string,
+  ): M4aCover["mimeType"] | undefined {
+    if (data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) {
+      return "image/jpeg";
+    }
+    if (
+      data.length >= 8 &&
+      data[0] === 0x89 &&
+      data[1] === 0x50 &&
+      data[2] === 0x4e &&
+      data[3] === 0x47 &&
+      data[4] === 0x0d &&
+      data[5] === 0x0a &&
+      data[6] === 0x1a &&
+      data[7] === 0x0a
+    ) {
+      return "image/png";
+    }
+
+    const normalizedContentType = contentType?.split(";", 1)[0].trim().toLowerCase();
+    if (normalizedContentType === "image/jpeg" || normalizedContentType === "image/jpg") {
+      return "image/jpeg";
+    }
+    if (normalizedContentType === "image/png") return "image/png";
+
+    try {
+      const extension = new URL(imageUrl).pathname.toLowerCase().split(".").pop();
+      if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+      if (extension === "png") return "image/png";
+    } catch {
+      // URLとして解釈できない場合はカバー画像なしで続行します。
+    }
+
+    return undefined;
+  }
+
   /**
    * RadikoClientの新しいインスタンスを作成します。
-   * @param ffmpegPath ffmpeg実行ファイルのパス。デフォルトは "ffmpeg"。
    */
-  constructor(ffmpegPath = "ffmpeg") {
-    this.ffmpegPath = ffmpegPath;
+  constructor() {
     this.cacheDir = join(tmpdir(), "radiko-cache");
     // キャッシュディレクトリが存在しない場合は作成する
     mkdir(this.cacheDir, { recursive: true });
@@ -372,8 +407,7 @@ export class RadikoClient {
   // --- 録音関連 ---
 
   /**
-   * Radikoのタイムフリー番組を録音します。
-   * **注意:** このメソッドを実行するには、システムに`ffmpeg`がインストールされている必要があります。
+   * Radikoのタイムフリー番組を録音し、M4Aファイルとして保存します。
    * @param program 録音する番組情報 (`RadikoProgram`オブジェクト)。
    * @param stationId 放送局ID (例: "TBS")。
    * @param programTitle 番組名（ファイル名として使用）。
@@ -409,69 +443,50 @@ export class RadikoClient {
       saveDirectory,
     );
 
-    // 画像がない場合は、録音のみ実行して終了
-    if (!programImage) {
-      return this.executeRecording(stationId, startTime, endTime, finalOutputPath);
-    }
+    let cover: M4aCover | undefined;
+    if (programImage) {
+      try {
+        const imageResponse = await fetch(programImage);
+        if (!imageResponse.ok) {
+          throw new Error(`HTTP ${imageResponse.status} ${imageResponse.statusText}`);
+        }
 
-    // 画像がある場合は、一時ファイルに録音
-    const { tmpdir } = await import("os");
-    const { writeFile, rm, rename } = await import("fs/promises");
-    const tempAudioPath = join(tmpdir(), `radiko_temp_${Date.now()}.m4a`);
-
-    await this.executeRecording(stationId, startTime, endTime, tempAudioPath);
-
-    let tempImagePath: string | undefined;
-    try {
-      // 画像を一時ファイルにダウンロード
-      const imageResponse = await fetch(programImage);
-      if (!imageResponse.ok) {
-        logger.warn(`カバー画像のダウンロードに失敗しました: ${imageResponse.statusText}`, {
+        const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+        const mimeType = RadikoClient.detectCoverMimeType(
+          imageBuffer,
+          imageResponse.headers.get("content-type"),
           programImage,
-          status: imageResponse.status,
+        );
+        if (mimeType) {
+          cover = { data: imageBuffer, mimeType };
+        } else {
+          logger.warn("対応していない形式のカバー画像なので、画像なしで保存します。", { programImage });
+        }
+      } catch (error) {
+        logger.warn("カバー画像のダウンロードに失敗したため、画像なしで保存します。", {
+          programImage,
+          error: error instanceof Error ? error.message : String(error),
         });
-        throw new Error(`カバー画像のダウンロードに失敗しました: ${imageResponse.statusText}`);
-      }
-      const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
-      const tempImageExt = programImage.split(".").pop()?.split("?")[0] || "jpg";
-      tempImagePath = join(tmpdir(), `radiko_cover_${Date.now()}.${tempImageExt}`);
-      await writeFile(tempImagePath, imageBuffer);
-      logger.info(`カバー画像を一時ファイルに保存しました: ${tempImagePath}`);
-
-      // カバー画像とメタデータを追加
-      await this.addMetadata(
-        tempAudioPath,
-        finalOutputPath,
-        programTitle,
-        program.pfm, // artist
-        program.stationName, // album
-        tempImagePath,
-      );
-
-      return finalOutputPath;
-    } catch (error) {
-      logger.error(
-        `カバー画像またはメタデータの追加に失敗しました: ${error}。録音ファイルはメタデータなしで保存されます。`,
-        error,
-      );
-      // メタデータの追加に失敗した場合は、一時音声ファイルを最終的なパスに移動する
-      await rename(tempAudioPath, finalOutputPath);
-      return finalOutputPath;
-    } finally {
-      // 一時ファイルをクリーンアップ
-      await rm(tempAudioPath, { force: true });
-      if (tempImagePath) {
-        await rm(tempImagePath, { force: true });
       }
     }
+
+    const metadata: M4aMetadata = {
+      title: programTitle,
+      artist: program.pfm,
+      album: program.stationName,
+      cover,
+    };
+
+    return this.executeRecording(stationId, startTime, endTime, finalOutputPath, metadata);
   }
 
   /**
-   * ffmpegを使用して録音を実行します。
+   * AACセグメントを取得し、M4Aファイルとして保存します。
    * @param stationId 放送局ID。
    * @param startTime 録音開始時間 (形式: YYYYMMDDHHmmss)。
    * @param endTime 録音終了時間 (形式: YYYYMMDDHHmmss)。
    * @param outputPath 出力ファイルのパス。
+   * @param metadata M4Aに埋め込むメタデータ。
    * @returns 録音されたファイルのパスを含むPromise。
    * @throws 認証トークンが見つからない場合にエラーをスローします。
    */
@@ -480,6 +495,7 @@ export class RadikoClient {
     startTime: string,
     endTime: string,
     outputPath: string,
+    metadata: M4aMetadata = {},
   ): Promise<string> {
     if (!this.authToken) {
       logger.error("認証トークンが見つかりません。録音を実行できません。");
@@ -513,9 +529,8 @@ export class RadikoClient {
     await mkdir(tempDir, { recursive: true });
 
     try {
-      const segmentListPath = join(tempDir, "segments.txt");
-      await this.downloadSegments(segmentUrls, tempDir, segmentListPath);
-      await this.concatSegments(segmentListPath, outputPath);
+      const segmentPaths = await this.downloadSegments(segmentUrls, tempDir);
+      await writeM4aFromAdtsFiles(segmentPaths, outputPath, metadata);
       logger.info(`録音が完了しました: ${outputPath}`);
       return outputPath;
     } finally {
@@ -569,14 +584,12 @@ export class RadikoClient {
     return segments;
   }
 
-  private async downloadSegments(segmentUrls: string[], dir: string, listPath: string): Promise<void> {
-    const lines: string[] = [];
+  private async downloadSegments(segmentUrls: string[], dir: string): Promise<string[]> {
+    const filePaths: string[] = [];
 
     for (let i = 0; i < segmentUrls.length; i++) {
       const segmentUrl = segmentUrls[i];
-      const url = new URL(segmentUrl);
-      const ext = extname(url.pathname) || ".aac";
-      const filename = `seg_${String(i).padStart(6, "0")}${ext}`;
+      const filename = `seg_${String(i).padStart(6, "0")}.aac`;
       const filePath = join(dir, filename);
 
       const response = await fetch(segmentUrl);
@@ -585,49 +598,10 @@ export class RadikoClient {
       }
       const buffer = Buffer.from(await response.arrayBuffer());
       await writeFile(filePath, buffer);
-
-      const escapedPath = filePath.replace(/'/g, "'\\''");
-      lines.push(`file '${escapedPath}'`);
+      filePaths.push(filePath);
     }
 
-    await writeFile(listPath, lines.join("\n"), "utf-8");
-  }
-
-  private concatSegments(listPath: string, outputPath: string): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      const args = [
-        "-y",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        listPath,
-        "-bsf:a",
-        "aac_adtstoasc",
-        "-acodec",
-        "copy",
-        outputPath,
-      ];
-
-      const ffmpeg = spawn(this.ffmpegPath, args);
-
-      ffmpeg.stderr.on("data", (data) => {
-        logger.debug(`ffmpeg stderr: ${data}`);
-      });
-
-      ffmpeg.on("close", (code) => {
-        if (code === 0) {
-          resolve();
-        } else {
-          reject(new Error(`ffmpegプロセスがエラーコード ${code} で終了しました。`));
-        }
-      });
-
-      ffmpeg.on("error", (err) => {
-        reject(new Error(`ffmpegプロセスの開始に失敗しました: ${err.message}`));
-      });
-    });
+    return filePaths;
   }
 
   private static parsePlaylist(playlist: string, baseUrl: string): string[] {
@@ -669,77 +643,5 @@ export class RadikoClient {
       `${pad(date.getMinutes())}` +
       `${pad(date.getSeconds())}`
     );
-  }
-
-  /**
-   * 音声ファイルにメタデータとカバー画像を追加します。
-   * **注意:** このメソッドを実行するには、システムに`ffmpeg`がインストールされている必要があります。
-   * @param audioFilePath 入力音声ファイルのパス。
-   * @param outputFilePath 出力音声ファイルのパス。 **`audioFilePath`とは異なるパスを指定してください。**
-   * @param title 曲名。
-   * @param artist アーティスト名。
-   * @param album アルバム名。
-   * @param imageFilePath (任意) カバー画像のパス。
-   * @returns メタデータが追加された新しいファイルのパスを含む`Promise<string>`。
-   * @throws 入力パスと出力パスが同じ場合にエラーをスローします。
-   */
-  public async addMetadata(
-    audioFilePath: string,
-    outputFilePath: string,
-    title: string,
-    artist: string,
-    album: string,
-    imageFilePath?: string,
-  ): Promise<string> {
-    if (audioFilePath === outputFilePath) {
-      return Promise.reject(new Error("入力ファイルパスと出力ファイルパスを同じにすることはできません。"));
-    }
-
-    return new Promise<string>((resolve, reject) => {
-      const args = [
-        "-y", // 出力ファイルが既に存在する場合に上書きする
-        "-i",
-        audioFilePath,
-      ];
-
-      // 画像が指定されている場合は追加
-      if (imageFilePath) {
-        args.push("-i", imageFilePath, "-map", "0:a", "-map", "1:v", "-c", "copy", "-disposition:1", "attached_pic");
-      }
-
-      // メタデータを追加
-      args.push(
-        "-metadata",
-        `title=${title}`,
-        "-metadata",
-        `artist=${artist}`,
-        "-metadata",
-        `album=${album}`,
-        "-id3v2_version",
-        "3",
-        outputFilePath,
-      );
-
-      const ffmpeg = spawn(this.ffmpegPath, args);
-
-      ffmpeg.stderr.on("data", (data) => {
-        logger.debug(`ffmpeg stderr (addMetadata): ${data}`);
-      });
-
-      ffmpeg.on("close", (code) => {
-        if (code === 0) {
-          logger.info(`メタデータとカバー画像の追加に成功しました: ${outputFilePath}`);
-          resolve(outputFilePath);
-        } else {
-          logger.error(`ffmpegプロセスがエラーコード ${code} で終了しました。(addMetadata)`, { code, outputFilePath });
-          reject(new Error(`ffmpegプロセスがエラーコード ${code} で終了しました。`));
-        }
-      });
-
-      ffmpeg.on("error", (err) => {
-        logger.error(`ffmpegプロセスの開始に失敗しました。(addMetadata): ${err.message}`, err);
-        reject(new Error(`ffmpegプロセスの開始に失敗しました: ${err.message}`));
-      });
-    });
   }
 }

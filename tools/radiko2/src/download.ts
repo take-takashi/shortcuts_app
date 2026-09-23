@@ -7,7 +7,6 @@ interface CliOptions {
   keywords: string;
   date: string;
   saveDirectory: string;
-  ffmpegPath: string;
   excludeStationIds: string[];
   overwrite: boolean;
   includeFuture: boolean;
@@ -21,7 +20,6 @@ function printUsage(): void {
   -k, --keywords <文字列>       番組名・パーソナリティの検索語（|でOR検索）
   -d, --date <日付>             yesterday（既定）、today、またはYYYYMMDD
       --save-directory <パス>   保存先（既定: ~/Downloads）
-      --ffmpeg-path <パス>      ffmpegのパス（既定: ffmpeg）
       --exclude-stations <ID>   除外する放送局ID（カンマ区切り）
       --overwrite               既存ファイルを上書きする
       --include-future          放送終了前の番組も対象にする
@@ -29,7 +27,7 @@ function printUsage(): void {
 
 環境変数でも指定できます:
   RADIKO_KEYWORDS, RADIKO_DATE, RADIKO_SAVE_DIRECTORY,
-  RADIKO_FFMPEG_PATH, RADIKO_EXCLUDE_STATION_IDS
+  RADIKO_EXCLUDE_STATION_IDS
 `);
 }
 
@@ -63,10 +61,6 @@ function parseArguments(args: string[]): Partial<CliOptions> & { help?: boolean 
         break;
       case "--save-directory":
         options.saveDirectory = getOptionValue(args, index, arg);
-        index += 1;
-        break;
-      case "--ffmpeg-path":
-        options.ffmpegPath = getOptionValue(args, index, arg);
         index += 1;
         break;
       case "--exclude-stations":
@@ -115,7 +109,6 @@ function buildOptions(args: string[]): CliOptions {
     keywords,
     date: resolveDate(parsed.date ?? process.env.RADIKO_DATE),
     saveDirectory,
-    ffmpegPath: parsed.ffmpegPath ?? process.env.RADIKO_FFMPEG_PATH ?? "ffmpeg",
     excludeStationIds,
     overwrite: parsed.overwrite ?? false,
     includeFuture: parsed.includeFuture ?? false,
@@ -154,7 +147,7 @@ async function run(options: CliOptions): Promise<void> {
   console.log(`保存先: ${options.saveDirectory}`);
 
   logger.info("自動ダウンロードを開始しました", { ...options, keywords });
-  const client = new RadikoClient(options.ffmpegPath);
+  const client = new RadikoClient();
   await client.authenticate();
 
   const stations = (await client.getStationList()).filter(
