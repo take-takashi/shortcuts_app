@@ -14,7 +14,7 @@ interface CliOptions {
 
 function printUsage(): void {
   console.log(`使い方:
-  pnpm run download --keywords "伊集院光|サンドウィッチマン"
+  mise run download -- --keywords "伊集院光|サンドウィッチマン"
 
 オプション:
   -k, --keywords <文字列>       番組名・パーソナリティの検索語（|でOR検索）

@@ -13,11 +13,21 @@ mise run build
 ```
 
 音声は内蔵のM4A writerで保存するため、`ffmpeg`は不要です。
+実行環境と単一バイナリのビルドにはBunを使用します。
+
+## 単一バイナリのビルド
+
+macOS arm64向けの実行ファイルを作成します。
+
+```bash
+mise run compile
+./dist/radiko2 --help
+```
 
 ## 実行
 
 ```bash
-pnpm run download --keywords "伊集院光|サンドウィッチマン"
+mise run download -- --keywords "伊集院光|サンドウィッチマン"
 ```
 
 `|`で区切ったキーワードはOR検索になります。番組タイトルとパーソナリティ名が検索対象です。
@@ -26,10 +36,10 @@ pnpm run download --keywords "伊集院光|サンドウィッチマン"
 
 ```bash
 # 今日
-pnpm run download --keywords "伊集院光" --date today
+mise run download -- --keywords "伊集院光" --date today
 
 # 指定日（YYYYMMDD）
-pnpm run download --keywords "伊集院光" --date 20250630
+mise run download -- --keywords "伊集院光" --date 20250630
 ```
 
 既存ファイルはデフォルトでスキップします。上書きする場合は`--overwrite`を指定してください。
@@ -55,7 +65,7 @@ cd /Users/ユーザー名/path/to/shortcuts_app/tools/radiko2
 mise run download -- --keywords "伊集院光|サンドウィッチマン"
 ```
 
-`mise install`でNode.jsとpnpmを揃えます。`mise run build`は初回、またはソース変更後に実行します。
+`mise install`でBunを揃えます。`mise run build`は初回、またはソース変更後に実行します。
 
 設定値は環境変数でも指定できます。
 

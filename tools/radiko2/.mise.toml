@@ -1,33 +1,39 @@
 min_version = "2025.2.0"
 
 [tools]
-node = "24"
-pnpm = "11.9.0"
+bun = "1.4.2"
 
 [tasks.install]
-description = "pnpmの依存関係をインストール"
-run = "pnpm install --frozen-lockfile"
-sources = ["package.json", "pnpm-lock.yaml"]
-outputs = ["node_modules/.modules.yaml"]
+description = "Bunの依存関係をインストール"
+run = "bun install --frozen-lockfile"
+sources = ["package.json", "bun.lock"]
+outputs = ["node_modules"]
 
 [tasks.build]
 description = "TypeScriptをビルド"
 depends = ["install"]
-run = "pnpm run build"
-sources = ["src/**/*.ts", "package.json", "tsconfig.json", "pnpm-lock.yaml"]
+run = "bun run build"
+sources = ["src/**/*.ts", "package.json", "tsconfig.json", "bun.lock"]
 outputs = ["dist/**/*.js"]
 
 [tasks.typecheck]
 description = "TypeScriptの型チェック"
 depends = ["install"]
-run = "pnpm run typecheck"
+run = "bun run typecheck"
+
+[tasks.compile]
+description = "Bunの単一実行ファイルを作成（macOS arm64）"
+depends = ["typecheck"]
+run = "bun run compile"
+sources = ["src/**/*.ts", "package.json", "bun.lock"]
+outputs = ["dist/radiko2"]
 
 [tasks.download]
 description = "radiko番組を検索してダウンロード"
 depends = ["build"]
-run = "pnpm run download \"$@\""
+run = "bun run download \"$@\""
 
 [tasks.help]
 description = "ダウンロードコマンドのヘルプを表示"
 depends = ["build"]
-run = "pnpm run download --help"
+run = "bun run download --help"
