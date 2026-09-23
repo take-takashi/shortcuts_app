@@ -13,10 +13,17 @@ mise run build
 
 ## CLI
 
-```bash
-export NOTION_TOKEN="..."
-export NOTION_DATABASE_ID="..."
+初回だけ設定ファイルを生成し、`token`と`databaseId`を編集します。
 
+```bash
+./dist/notion config init
+$EDITOR ~/.config/shortcuts_app/config.json
+chmod 600 ~/.config/shortcuts_app/config.json
+```
+
+以降は環境変数を指定せずに実行できます。
+
+```bash
 # 1ファイル
 ./dist/notion upload ./recording.m4a \
   --title "番組タイトル" \
@@ -28,6 +35,8 @@ export NOTION_DATABASE_ID="..."
 # マニフェスト
 ./dist/notion upload --manifest /tmp/radiko-downloads.json
 ```
+
+設定ファイルは`--config`で変更できます。`NOTION_TOKEN`と`NOTION_DATABASE_ID`は設定ファイルがない場合のフォールバックとしても利用できます。
 
 マニフェストのパスは絶対パス、またはマニフェストからの相対パスとして解決されます。
 

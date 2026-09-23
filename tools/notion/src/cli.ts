@@ -1,11 +1,19 @@
 import { readFile } from "fs/promises";
 import { basename, dirname, extname, isAbsolute, resolve } from "path";
 import { homedir } from "os";
+import {
+  initializeConfig,
+  readAppConfig,
+  resolveConfigPath,
+  type AppConfig,
+  type NotionConfig,
+} from "./config";
 import { NotionApi } from "./notion-api";
 import { NotionUploadWorkflow } from "./workflow";
 import type { NotionUploadResult, UploadManifest, UploadManifestFile } from "./types";
 
 interface CliOptions {
+  token: string;
   databaseId: string;
   titleProperty: string;
   filePropertyName?: string | null;
@@ -15,21 +23,40 @@ interface CliOptions {
 
 function printUsage(): void {
   console.log(`使い方:
-  notion upload <ファイル...>
-  notion upload --manifest <マニフェスト.json>
+  notion [--config <パス>] upload <ファイル...>
+  notion [--config <パス>] upload --manifest <マニフェスト.json>
+  notion [--config <パス>] config init
+  notion [--config <パス>] config path
+  notion [--config <パス>] config show
 
 オプション:
-      --database-id <ID>       NotionデータベースID（既定: NOTION_DATABASE_ID）
+      --config <パス>          設定ファイル（既定: ~/.config/shortcuts_app/config.json）
+      --database-id <ID>       NotionデータベースID
       --manifest <パス>         アップロード対象のマニフェスト
       --title <タイトル>       ファイル1つの場合のページタイトル
-      --title-property <名前>  タイトルプロパティ名（既定: Name）
+      --title-property <名前>  タイトルプロパティ名
       --file-property <名前>   添付先のFilesプロパティ名
       --no-file-property       Filesプロパティを更新しない
   -h, --help                   このヘルプを表示
 
-環境変数:
-  NOTION_TOKEN
-  NOTION_DATABASE_ID
+設定:
+  notion config init           設定ファイルのテンプレートを生成
+  notion config path           使用する設定ファイルのパスを表示
+  notion config show           設定内容を表示（tokenはマスク）
+
+環境変数は設定ファイルの値がない場合のフォールバックとして利用できます:
+  NOTION_TOKEN, NOTION_DATABASE_ID
+`);
+}
+
+function printConfigUsage(): void {
+  console.log(`使い方:
+  notion config init [--force]
+  notion config path
+  notion config show
+
+config initは設定ファイルのテンプレートを生成します。
+既存ファイルを上書きする場合は--forceを指定してください。
 `);
 }
 
@@ -41,7 +68,29 @@ function getOptionValue(args: string[], index: number, option: string): string {
   return value;
 }
 
-async function parseArguments(args: string[]): Promise<CliOptions | undefined> {
+function extractConfigOption(args: string[]): { args: string[]; configPath: string } {
+  let configPath: string | undefined;
+  const remaining: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--config") {
+      const value = getOptionValue(args, index, arg);
+      configPath = value;
+      index += 1;
+    } else {
+      remaining.push(arg);
+    }
+  }
+
+  return { args: remaining, configPath: resolveConfigPath(configPath) };
+}
+
+async function parseArguments(
+  args: string[],
+  config: AppConfig | undefined,
+  configPath: string,
+): Promise<CliOptions | undefined> {
   if (args.length === 0 || args[0] === "-h" || args[0] === "--help") {
     printUsage();
     return undefined;
@@ -50,12 +99,16 @@ async function parseArguments(args: string[]): Promise<CliOptions | undefined> {
     throw new Error(`不明なコマンドです: ${args[0]}`);
   }
 
-  let databaseId = process.env.NOTION_DATABASE_ID ?? "";
+  const notion = config?.notion;
+  let token = notion?.token || process.env.NOTION_TOKEN || "";
+  let databaseId = notion?.databaseId || process.env.NOTION_DATABASE_ID || "";
   let manifestPath: string | undefined;
   let title: string | undefined;
-  let titleProperty = "Name";
-  let filePropertyName: string | null | undefined;
-  let filePropertySpecified = false;
+  let titleProperty =
+    notion?.titleProperty || process.env.NOTION_TITLE_PROPERTY || "Name";
+  let filePropertyName: string | null | undefined =
+    notion?.filePropertyName || process.env.NOTION_FILE_PROPERTY;
+  let filePropertySpecified = Boolean(filePropertyName);
   const filePaths: string[] = [];
 
   for (let index = 1; index < args.length; index += 1) {
@@ -103,7 +156,11 @@ async function parseArguments(args: string[]): Promise<CliOptions | undefined> {
   if (title && (manifestPath || filePaths.length !== 1)) {
     throw new Error("--titleはファイルを1つ指定する場合のみ使用できます。");
   }
-  if (!databaseId) throw new Error("NotionデータベースIDを指定してください。");
+  if (!token || !databaseId) {
+    throw new Error(
+      `Notion設定が不足しています。設定ファイルを編集してください: ${configPath}（初期化: notion config init）`,
+    );
+  }
 
   const items = manifestPath
     ? await readManifest(manifestPath)
@@ -114,6 +171,7 @@ async function parseArguments(args: string[]): Promise<CliOptions | undefined> {
   if (items.length === 0) throw new Error("アップロードするファイルがありません。");
 
   return {
+    token,
     databaseId,
     titleProperty,
     filePropertyName,
@@ -123,13 +181,14 @@ async function parseArguments(args: string[]): Promise<CliOptions | undefined> {
 }
 
 async function readManifest(manifestPath: string): Promise<UploadManifestFile[]> {
-  const manifestText = await readFile(manifestPath, "utf8");
+  const resolvedManifestPath = resolveInputPath(manifestPath);
+  const manifestText = await readFile(resolvedManifestPath, "utf8");
   const manifest = JSON.parse(manifestText) as Partial<UploadManifest>;
   if (manifest.version !== 1 || !Array.isArray(manifest.files)) {
     throw new Error("未対応のマニフェスト形式です。");
   }
 
-  const baseDirectory = dirname(resolve(manifestPath));
+  const baseDirectory = dirname(resolveManifestPath(resolvedManifestPath, process.cwd()));
   return manifest.files.map((item) => {
     if (!item || typeof item.path !== "string" || item.path.length === 0) {
       throw new Error("マニフェスト内のファイルパスが不正です。");
@@ -139,6 +198,12 @@ async function readManifest(manifestPath: string): Promise<UploadManifestFile[]>
       path: resolveManifestPath(item.path, baseDirectory),
     };
   });
+}
+
+function resolveInputPath(filePath: string): string {
+  if (filePath === "~") return homedir();
+  if (filePath.startsWith("~/")) return resolve(homedir(), filePath.slice(2));
+  return isAbsolute(filePath) ? filePath : resolve(process.cwd(), filePath);
 }
 
 function resolveManifestPath(filePath: string, baseDirectory: string): string {
@@ -151,14 +216,68 @@ function defaultTitle(filePath: string): string {
   return basename(filePath, extname(filePath));
 }
 
+async function runConfigCommand(args: string[], configPath: string): Promise<void> {
+  const command = args[1] ?? "";
+  if (!command || command === "-h" || command === "--help") {
+    printConfigUsage();
+    return;
+  }
+
+  switch (command) {
+    case "init": {
+      const initArgs = args.slice(2);
+      if (initArgs.includes("-h") || initArgs.includes("--help")) {
+        printConfigUsage();
+        return;
+      }
+      const force = initArgs.includes("--force");
+      const unexpected = initArgs.filter((arg) => arg !== "--force");
+      if (unexpected.length > 0) throw new Error(`不明なオプションです: ${unexpected[0]}`);
+      await initializeConfig(configPath, force);
+      console.log(`設定ファイルを生成しました: ${configPath}`);
+      console.log("tokenとdatabaseIdを編集してください。");
+      return;
+    }
+    case "path":
+      if (args.length > 2) throw new Error("config pathには追加の引数を指定できません。");
+      console.log(configPath);
+      return;
+    case "show": {
+      if (args.length > 2) throw new Error("config showには追加の引数を指定できません。");
+      const config = await readAppConfig(configPath);
+      if (!config) {
+        console.log(`設定ファイルがありません: ${configPath}`);
+        return;
+      }
+      console.log(JSON.stringify(maskToken(config), null, 2));
+      return;
+    }
+    default:
+      throw new Error("configのサブコマンドはinit、path、showのいずれかです。");
+  }
+}
+
+function maskToken(config: AppConfig): AppConfig {
+  const notion: NotionConfig | undefined = config.notion
+    ? { ...config.notion, token: config.notion.token ? "********" : "" }
+    : undefined;
+  return { ...config, notion };
+}
+
 async function main(): Promise<void> {
-  const options = await parseArguments(process.argv.slice(2));
+  const extracted = extractConfigOption(process.argv.slice(2));
+  const { args, configPath } = extracted;
+
+  if (args[0] === "config") {
+    await runConfigCommand(args, configPath);
+    return;
+  }
+
+  const config = await readAppConfig(configPath);
+  const options = await parseArguments(args, config, configPath);
   if (!options) return;
 
-  const token = process.env.NOTION_TOKEN;
-  if (!token) throw new Error("環境変数NOTION_TOKENが設定されていません。");
-
-  const api = new NotionApi({ token });
+  const api = new NotionApi({ token: options.token });
   const workflow = new NotionUploadWorkflow(api);
   const uploaded: NotionUploadResult[] = [];
   const failures: { path: string; error: string }[] = [];
