@@ -9,31 +9,24 @@ run = "bun install --frozen-lockfile"
 sources = ["package.json", "bun.lock"]
 outputs = ["node_modules"]
 
-[tasks.build]
-description = "TypeScriptをビルド"
-depends = ["install"]
-run = "bun run build"
-sources = ["src/**/*.ts", "package.json", "tsconfig.json", "bun.lock"]
-outputs = ["dist/**/*.js"]
-
 [tasks.typecheck]
 description = "TypeScriptの型チェック"
 depends = ["install"]
 run = "bun run typecheck"
 
-[tasks.compile]
+[tasks.build]
 description = "Bunの単一実行ファイルを作成（macOS arm64）"
 depends = ["typecheck"]
-run = "bun run compile"
+run = "bun run build"
 sources = ["src/**/*.ts", "package.json", "bun.lock"]
 outputs = ["dist/radiko2"]
 
 [tasks.download]
 description = "radiko番組を検索してダウンロード"
-depends = ["build"]
+depends = ["typecheck"]
 run = "bun run download \"$@\""
 
 [tasks.help]
 description = "ダウンロードコマンドのヘルプを表示"
-depends = ["build"]
+depends = ["typecheck"]
 run = "bun run download --help"

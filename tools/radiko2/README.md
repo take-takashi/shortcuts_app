@@ -8,7 +8,6 @@ macOSのショートカットのオートメーションから実行できます
 ```bash
 cd tools/radiko2
 mise install
-mise run install
 mise run build
 ```
 
@@ -17,10 +16,10 @@ mise run build
 
 ## 単一バイナリのビルド
 
-macOS arm64向けの実行ファイルを作成します。
+macOS arm64向けの実行ファイルを作成します。`mise run build`が単一バイナリのビルドです。
 
 ```bash
-mise run compile
+mise run build
 ./dist/radiko2 --help
 ```
 

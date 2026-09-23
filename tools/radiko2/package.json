@@ -3,13 +3,12 @@
   "version": "1.0.0",
   "private": true,
   "description": "radikoのタイムフリー番組をキーワードで自動ダウンロードするCLI",
-  "main": "dist/download.js",
+  "main": "src/download.ts",
   "packageManager": "bun@1.4.2",
   "scripts": {
-    "build": "tsc",
-    "download": "bun dist/download.js",
-    "typecheck": "tsc --noEmit",
-    "compile": "bun build --compile --target=bun-darwin-arm64 src/download.ts --outfile dist/radiko2"
+    "build": "bun build --compile --target=bun-darwin-arm64 src/download.ts --outfile dist/radiko2",
+    "download": "bun src/download.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "fast-xml-parser": "^4.4.0"
