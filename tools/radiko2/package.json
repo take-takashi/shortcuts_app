@@ -1,0 +1,22 @@
+{
+  "name": "radiko2",
+  "version": "1.0.0",
+  "private": true,
+  "description": "radikoのタイムフリー番組をキーワードで自動ダウンロードするCLI",
+  "main": "dist/download.js",
+  "scripts": {
+    "build": "tsc",
+    "download": "node dist/download.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

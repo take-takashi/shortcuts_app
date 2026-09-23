@@ -1,0 +1,33 @@
+min_version = "2025.2.0"
+
+[tools]
+node = "24"
+pnpm = "11.9.0"
+
+[tasks.install]
+description = "pnpmの依存関係をインストール"
+run = "pnpm install --frozen-lockfile"
+sources = ["package.json", "pnpm-lock.yaml"]
+outputs = ["node_modules/.modules.yaml"]
+
+[tasks.build]
+description = "TypeScriptをビルド"
+depends = ["install"]
+run = "pnpm run build"
+sources = ["src/**/*.ts", "package.json", "tsconfig.json", "pnpm-lock.yaml"]
+outputs = ["dist/**/*.js"]
+
+[tasks.typecheck]
+description = "TypeScriptの型チェック"
+depends = ["install"]
+run = "pnpm run typecheck"
+
+[tasks.download]
+description = "radiko番組を検索してダウンロード"
+depends = ["build"]
+run = "pnpm run download \"$@\""
+
+[tasks.help]
+description = "ダウンロードコマンドのヘルプを表示"
+depends = ["build"]
+run = "pnpm run download --help"
