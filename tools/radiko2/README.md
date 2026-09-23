@@ -50,9 +50,20 @@ mise run download -- --keywords "伊集院光" --date 20250630
 -k, --keywords <文字列>       検索語（|でOR検索）
 -d, --date <日付>             yesterday（既定）、today、またはYYYYMMDD
     --save-directory <パス>   保存先（既定: ~/Downloads）
+    --manifest-output <パス>  成功したファイルのマニフェスト出力先
     --exclude-stations <ID>   除外する放送局ID（カンマ区切り）
     --overwrite               既存ファイルを上書き
     --include-future          放送終了前の番組も対象にする
+```
+
+## マニフェスト出力
+
+ダウンロード成功ファイルを、別のCLIやオーケストレーターへ渡せます。
+
+```bash
+mise run download -- \
+  --keywords "伊集院光" \
+  --manifest-output /tmp/radiko-downloads.json
 ```
 
 ## ショートカットからの実行例
@@ -65,6 +76,7 @@ mise run download -- --keywords "伊集院光|サンドウィッチマン"
 ```
 
 `mise install`でBunを揃えます。`mise run build`は初回、またはソース変更後に実行します。
+Notionなど別の処理へ渡す場合は、成功したファイルのマニフェストを出力できます。
 
 設定値は環境変数でも指定できます。
 
@@ -72,6 +84,7 @@ mise run download -- --keywords "伊集院光|サンドウィッチマン"
 RADIKO_KEYWORDS
 RADIKO_DATE
 RADIKO_SAVE_DIRECTORY
+RADIKO_MANIFEST_OUTPUT
 RADIKO_EXCLUDE_STATION_IDS
 ```
 

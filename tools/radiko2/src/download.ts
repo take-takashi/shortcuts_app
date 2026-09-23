@@ -1,5 +1,6 @@
 import { access, constants, mkdir } from "fs/promises";
 import { RadikoClient, RadikoProgram } from "./radiko-client";
+import { createDownloadManifestEntry, writeDownloadManifest, type DownloadManifestEntry } from "./download-manifest";
 import { logger } from "./logger";
 import { expandHomeDirectory, getSearchKeywords, matchesSearch, resolveDate } from "./utils";
 
@@ -7,6 +8,7 @@ interface CliOptions {
   keywords: string;
   date: string;
   saveDirectory: string;
+  manifestOutput?: string;
   excludeStationIds: string[];
   overwrite: boolean;
   includeFuture: boolean;
@@ -20,6 +22,7 @@ function printUsage(): void {
   -k, --keywords <文字列>       番組名・パーソナリティの検索語（|でOR検索）
   -d, --date <日付>             yesterday（既定）、today、またはYYYYMMDD
       --save-directory <パス>   保存先（既定: ~/Downloads）
+      --manifest-output <パス>  成功したファイルのマニフェスト出力先
       --exclude-stations <ID>   除外する放送局ID（カンマ区切り）
       --overwrite               既存ファイルを上書きする
       --include-future          放送終了前の番組も対象にする
@@ -27,7 +30,7 @@ function printUsage(): void {
 
 環境変数でも指定できます:
   RADIKO_KEYWORDS, RADIKO_DATE, RADIKO_SAVE_DIRECTORY,
-  RADIKO_EXCLUDE_STATION_IDS
+  RADIKO_MANIFEST_OUTPUT, RADIKO_EXCLUDE_STATION_IDS
 `);
 }
 
@@ -61,6 +64,10 @@ function parseArguments(args: string[]): Partial<CliOptions> & { help?: boolean 
         break;
       case "--save-directory":
         options.saveDirectory = getOptionValue(args, index, arg);
+        index += 1;
+        break;
+      case "--manifest-output":
+        options.manifestOutput = getOptionValue(args, index, arg);
         index += 1;
         break;
       case "--exclude-stations":
@@ -104,11 +111,13 @@ function buildOptions(args: string[]): CliOptions {
       .split(",")
       .map((id) => id.trim())
       .filter(Boolean);
+  const manifestOutput = parsed.manifestOutput ?? process.env.RADIKO_MANIFEST_OUTPUT;
 
   return {
     keywords,
     date: resolveDate(parsed.date ?? process.env.RADIKO_DATE),
     saveDirectory,
+    manifestOutput: manifestOutput ? expandHomeDirectory(manifestOutput) : undefined,
     excludeStationIds,
     overwrite: parsed.overwrite ?? false,
     includeFuture: parsed.includeFuture ?? false,
@@ -145,6 +154,7 @@ async function run(options: CliOptions): Promise<void> {
   console.log(`検索語: ${keywords.join(" OR ")}`);
   console.log(`対象日: ${options.date}`);
   console.log(`保存先: ${options.saveDirectory}`);
+  if (options.manifestOutput) console.log(`マニフェスト: ${options.manifestOutput}`);
 
   logger.info("自動ダウンロードを開始しました", { ...options, keywords });
   const client = new RadikoClient();
@@ -165,8 +175,10 @@ async function run(options: CliOptions): Promise<void> {
     .filter((program) => matchesSearch(program, keywords));
 
   console.log(`検索結果: ${matchingPrograms.length}件`);
+  const manifestEntries: DownloadManifestEntry[] = [];
   if (matchingPrograms.length === 0) {
     logger.info("検索に一致する番組はありませんでした");
+    if (options.manifestOutput) await writeDownloadManifest(options.manifestOutput, manifestEntries);
     return;
   }
 
@@ -201,6 +213,7 @@ async function run(options: CliOptions): Promise<void> {
         options.saveDirectory,
       );
       downloaded += 1;
+      manifestEntries.push(createDownloadManifestEntry(program, outputPath));
       console.log(`完了: ${outputPath}`);
       logger.info("番組のダウンロードが完了しました", { program, outputPath });
     } catch (error) {
@@ -209,6 +222,10 @@ async function run(options: CliOptions): Promise<void> {
       console.error(`失敗: ${program.title}: ${message}`);
       logger.error("番組のダウンロードに失敗しました", { program, error: message });
     }
+  }
+
+  if (options.manifestOutput) {
+    await writeDownloadManifest(options.manifestOutput, manifestEntries);
   }
 
   console.log(

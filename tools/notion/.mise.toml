@@ -1,0 +1,22 @@
+min_version = "2025.2.0"
+
+[tools]
+bun = "1.4.2"
+
+[tasks.install]
+description = "Bunの依存関係をインストール"
+run = "bun install --frozen-lockfile"
+sources = ["package.json", "bun.lock"]
+outputs = ["node_modules"]
+
+[tasks.typecheck]
+description = "TypeScriptの型チェック"
+depends = ["install"]
+run = "bun run typecheck"
+
+[tasks.build]
+description = "Notion CLIの単一実行ファイルを作成"
+depends = ["typecheck"]
+run = "bun run build"
+sources = ["src/**/*.ts", "package.json", "bun.lock"]
+outputs = ["dist/notion"]
