@@ -51,6 +51,7 @@ mise run download -- --keywords "伊集院光" --date 20250630
 -d, --date <日付>             yesterday（既定）、today、またはYYYYMMDD
     --save-directory <パス>   保存先（既定: ~/Downloads）
     --manifest-output <パス>  成功したファイルのマニフェスト出力先
+    --manifest-include-existing 既存ファイルもマニフェストに含める
     --exclude-stations <ID>   除外する放送局ID（カンマ区切り）
     --overwrite               既存ファイルを上書き
     --include-future          放送終了前の番組も対象にする
@@ -58,7 +59,7 @@ mise run download -- --keywords "伊集院光" --date 20250630
 
 ## マニフェスト出力
 
-ダウンロード成功ファイルを、別のCLIやオーケストレーターへ渡せます。
+ダウンロード成功ファイルを、別のCLIやオーケストレーターへ渡せます。既存ファイルをアップロード対象に含める場合は`--manifest-include-existing`を指定します。
 
 ```bash
 mise run download -- \

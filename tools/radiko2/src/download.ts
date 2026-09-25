@@ -12,6 +12,7 @@ interface CliOptions {
   excludeStationIds: string[];
   overwrite: boolean;
   includeFuture: boolean;
+  manifestIncludeExisting: boolean;
 }
 
 function printUsage(): void {
@@ -23,6 +24,7 @@ function printUsage(): void {
   -d, --date <日付>             yesterday（既定）、today、またはYYYYMMDD
       --save-directory <パス>   保存先（既定: ~/Downloads）
       --manifest-output <パス>  成功したファイルのマニフェスト出力先
+      --manifest-include-existing 既存ファイルもマニフェストに含める
       --exclude-stations <ID>   除外する放送局ID（カンマ区切り）
       --overwrite               既存ファイルを上書きする
       --include-future          放送終了前の番組も対象にする
@@ -83,6 +85,9 @@ function parseArguments(args: string[]): Partial<CliOptions> & { help?: boolean 
       case "--include-future":
         options.includeFuture = true;
         break;
+      case "--manifest-include-existing":
+        options.manifestIncludeExisting = true;
+        break;
       default:
         throw new Error(`不明なオプションです: ${arg}`);
     }
@@ -121,6 +126,7 @@ function buildOptions(args: string[]): CliOptions {
     excludeStationIds,
     overwrite: parsed.overwrite ?? false,
     includeFuture: parsed.includeFuture ?? false,
+    manifestIncludeExisting: parsed.manifestIncludeExisting ?? false,
   };
 }
 
@@ -197,7 +203,12 @@ async function run(options: CliOptions): Promise<void> {
     const outputPath = client.getProgramOutputPath(program, options.saveDirectory);
     if (!options.overwrite && await fileExists(outputPath)) {
       skippedExisting += 1;
-      console.log(`スキップ（既存）: ${outputPath}`);
+      if (options.manifestIncludeExisting) {
+        manifestEntries.push(createDownloadManifestEntry(program, outputPath));
+        console.log(`スキップ（既存・アップロード対象）: ${outputPath}`);
+      } else {
+        console.log(`スキップ（既存）: ${outputPath}`);
+      }
       continue;
     }
 

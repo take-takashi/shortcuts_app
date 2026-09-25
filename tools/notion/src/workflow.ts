@@ -47,27 +47,32 @@ export class NotionUploadWorkflow {
       }
 
       await hooks.afterPageResolved?.(context);
+      const fileName = basename(plan.filePath);
+      const existingUploadId = await this.api.findFileUploadIdByCaption(pageId, fileName);
+
       await hooks.beforeFileUpload?.(context);
-      const upload = await this.uploader.uploadFile(plan.filePath, {
-        fileType: plan.fileType,
-      });
+      const upload = existingUploadId
+        ? { id: existingUploadId }
+        : await this.uploader.uploadFile(plan.filePath, { fileType: plan.fileType });
       context.fileUpload = upload;
-      await hooks.afterFileUploaded?.(context);
+      if (!existingUploadId) await hooks.afterFileUploaded?.(context);
 
       const mimeTypeInfo = getMimeTypeFromPath(plan.filePath);
       await hooks.beforeFileAttached?.(context);
-      await this.api.appendFileBlock(
-        pageId,
-        upload.id,
-        plan.fileType ?? mimeTypeInfo.fileType,
-        basename(plan.filePath),
-      );
+      if (!existingUploadId) {
+        await this.api.appendFileBlock(
+          pageId,
+          upload.id,
+          plan.fileType ?? mimeTypeInfo.fileType,
+          fileName,
+        );
+      }
 
       if (plan.filePropertyName !== null) {
         context.filePropertyName = await this.api.appendFileProperty(
           pageId,
           upload.id,
-          basename(plan.filePath),
+          fileName,
           plan.filePropertyName,
         );
       }

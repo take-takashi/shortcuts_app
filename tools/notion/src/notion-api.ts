@@ -91,6 +91,42 @@ export class NotionApi {
     return this.request<NotionPage>(`pages/${encodeURIComponent(pageId)}`);
   }
 
+  public async findFileUploadIdByCaption(
+    pageId: string,
+    caption: string,
+  ): Promise<string | undefined> {
+    let cursor: string | undefined;
+
+    while (true) {
+      const params = new URLSearchParams({ page_size: "100" });
+      if (cursor) params.set("start_cursor", cursor);
+      const response = await this.request<{
+        results?: JsonObject[];
+        has_more?: boolean;
+        next_cursor?: string | null;
+      }>(`blocks/${encodeURIComponent(pageId)}/children?${params}`);
+
+      for (const block of response.results ?? []) {
+        const blockType = typeof block.type === "string" ? block.type : "";
+        const blockContent = block[blockType];
+        if (!blockContent || typeof blockContent !== "object") continue;
+
+        const content = blockContent as JsonObject;
+        if (content.type !== "file_upload" || getRichTextContent(content.caption) !== caption) {
+          continue;
+        }
+
+        const fileUpload = content.file_upload;
+        if (!fileUpload || typeof fileUpload !== "object") continue;
+        const uploadId = (fileUpload as JsonObject).id;
+        if (typeof uploadId === "string") return uploadId;
+      }
+
+      if (!response.has_more || !response.next_cursor) return undefined;
+      cursor = response.next_cursor;
+    }
+  }
+
   public async updatePage(pageId: string, properties: NotionProperties): Promise<NotionPage> {
     return this.request<NotionPage>(`pages/${encodeURIComponent(pageId)}`, {
       method: "PATCH",
@@ -150,6 +186,17 @@ export class NotionApi {
 
     const currentProperty = properties[targetPropertyName];
     const existingFiles = Array.isArray(currentProperty?.files) ? currentProperty.files : [];
+    const alreadyAttached = existingFiles.some((file) => {
+      const existingUploadId = file.file_upload;
+      return (
+        file.name === fileName ||
+        (existingUploadId &&
+          typeof existingUploadId === "object" &&
+          (existingUploadId as JsonObject).id === fileUploadId)
+      );
+    });
+    if (alreadyAttached) return targetPropertyName;
+
     const newFile = {
       type: "file_upload",
       name: fileName,
@@ -227,6 +274,21 @@ export class NotionApi {
 
     return body as T;
   }
+}
+
+function getRichTextContent(value: unknown): string {
+  if (!Array.isArray(value)) return "";
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") return "";
+      const richText = item as JsonObject;
+      if (typeof richText.plain_text === "string") return richText.plain_text;
+      const text = richText.text;
+      return text && typeof text === "object" && typeof (text as JsonObject).content === "string"
+        ? ((text as JsonObject).content as string)
+        : "";
+    })
+    .join("");
 }
 
 function parseResponseBody(text: string): unknown {
