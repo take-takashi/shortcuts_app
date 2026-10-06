@@ -4,6 +4,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
+from typing import Any
 
 import requests
 from notion_client import Client
@@ -253,6 +254,28 @@ class MyNotionHelper:
             raise Exception(
                 f"アイテムID「 {item_id}」の「{property_name}」ステータス更新に失敗: {e}"
             )
+
+    def add_comment(self, page_id: str, comment: str) -> Any:
+        """Notionページにコメントを追加する。"""
+        if not comment.strip():
+            raise ValueError("コメントが空です。")
+
+        # Notionのrich_text要素は1件あたり最大2000文字。
+        chunk_size = 1900
+        rich_text = [
+            {"type": "text", "text": {"content": comment[i : i + chunk_size]}}
+            for i in range(0, len(comment), chunk_size)
+        ]
+        if len(rich_text) > 100:
+            raise ValueError("コメントが長すぎます（rich_text要素は最大100件です）。")
+
+        try:
+            return self.notion.comments.create(
+                parent={"page_id": page_id},
+                rich_text=rich_text,
+            )
+        except Exception as e:
+            raise Exception(f"ページID「{page_id}」へのコメント投稿に失敗しました: {e}")
 
     # 指定したNotionページにファイルをアップロードする関数
     def upload_file(self, page_id: str, file_path: str):

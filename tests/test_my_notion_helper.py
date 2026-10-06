@@ -54,3 +54,28 @@ def test_add_music_info_to_db(notion_helper):
     assert properties["アルバム"]["rich_text"][0]["text"]["content"] == "Test Album"
     assert properties["No"]["rich_text"][0]["text"]["content"] == "1/10"
     assert properties["ファイル"]["files"][0]["name"] == "file.m4a"
+
+
+def test_add_comment_posts_comment_to_page(notion_helper):
+    notion_helper.add_comment("page-id", "A summary")
+
+    notion_helper.notion.comments.create.assert_called_once_with(
+        parent={"page_id": "page-id"},
+        rich_text=[{"type": "text", "text": {"content": "A summary"}}],
+    )
+
+
+def test_add_comment_splits_long_text(notion_helper):
+    comment = "a" * 2001
+    notion_helper.add_comment("page-id", comment)
+
+    rich_text = notion_helper.notion.comments.create.call_args.kwargs["rich_text"]
+    assert len(rich_text) == 2
+    assert "".join(item["text"]["content"] for item in rich_text) == comment
+
+
+def test_add_comment_rejects_empty_text(notion_helper):
+    with pytest.raises(ValueError, match="コメントが空"):
+        notion_helper.add_comment("page-id", "  ")
+
+    notion_helper.notion.comments.create.assert_not_called()
