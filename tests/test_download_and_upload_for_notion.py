@@ -22,6 +22,27 @@ def test_ytdlp_domains_are_recognized(url):
     assert workflow.is_ytdlp_url(url)
 
 
+def test_tokiomotion_nested_url_is_unwrapped():
+    malformed_url = (
+        "https://www.tokyomotion.net/video/7047105/"
+        "https%3A%2F%2Fwww.tokyomotion.net%2Fvideo%2F7047105%2F"
+        "%25E7%258E%2589%25E5%259F%258E"
+    )
+
+    assert workflow.normalize_tokiomotion_url(malformed_url) == (
+        "https://www.tokyomotion.net/video/7047105/%E7%8E%89%E5%9F%8E"
+    )
+
+
+def test_tokiomotion_normalization_leaves_other_urls_unchanged():
+    url = "https://www.tokyomotion.net/video/7047105/%E7%8E%89%E5%9F%8E"
+
+    assert workflow.normalize_tokiomotion_url(url) == url
+    assert workflow.normalize_tokiomotion_url("https://example.com/article") == (
+        "https://example.com/article"
+    )
+
+
 def test_non_ytdlp_domain_is_not_recognized():
     assert not workflow.is_ytdlp_url("https://notyoutube.com/article")
     assert not workflow.is_ytdlp_url("https://example.com/article")

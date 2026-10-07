@@ -6,7 +6,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import requests
 from bs4 import BeautifulSoup
@@ -34,6 +34,7 @@ YTDLP_DOMAINS = frozenset(
         "x.com",
         "twitter.com",  # Xの旧ドメイン
         "t.co",  # Xの短縮URL
+        "tokyomotion.net",
     }
 )
 X_DOMAINS = frozenset({"x.com", "twitter.com", "t.co"})
@@ -139,6 +140,21 @@ def is_x_url(url: str) -> bool:
     return any(host_matches_domain(host, domain) for domain in X_DOMAINS)
 
 
+def normalize_tokiomotion_url(url: str) -> str:
+    """TokyoMotionのパスに同じURLが埋め込まれた形を正規URLに戻す。"""
+    if not host_matches_domain(get_url_host(url), "tokyomotion.net"):
+        return url
+
+    path_parts = urlsplit(url).path.split("/", maxsplit=3)
+    if len(path_parts) < 4 or path_parts[1] != "video":
+        return url
+
+    nested_url = unquote(path_parts[3])
+    if host_matches_domain(get_url_host(nested_url), "tokyomotion.net"):
+        return nested_url
+    return url
+
+
 def is_browser_cookie_access_error(error: subprocess.CalledProcessError) -> bool:
     stderr = error.stderr or ""
     return "Operation not permitted" in stderr and "Cookies.binarycookies" in stderr
@@ -235,8 +251,12 @@ def download_file(url: str, output_dir: str = "~/Downloads") -> list[VideoInfo]:
 def process_ytdlp_item(notion: MyNotionHelper, item: dict, url: str) -> None:
     """対象動画をダウンロードし、Notionページにアップロードする。"""
     page_id = item["id"]
-    logger.info("▶ URL「%s」の動画をダウンロード中...", url)
-    video_infos = download_file(url)
+    download_url = normalize_tokiomotion_url(url)
+    if download_url != url:
+        logger.info("TokyoMotionのURLを正規化しました: %s", download_url)
+
+    logger.info("▶ URL「%s」の動画をダウンロード中...", download_url)
+    video_infos = download_file(download_url)
     if not video_infos:
         raise RuntimeError(f"URL「{url}」から動画情報を取得できませんでした。")
 
