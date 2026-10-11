@@ -125,9 +125,10 @@ def test_download_retries_without_browser_cookies_when_macos_denies_access():
     assert "--cookies-from-browser" not in run.call_args_list[1].args[0]
 
 
-def test_summarize_with_pi_uses_noninteractive_mode_without_tools():
+def test_summarize_with_pi_invokes_yomiyasu_without_tools():
     result = Mock(returncode=0, stdout="A concise summary", stderr="")
     with (
+        patch.object(workflow.Path, "is_file", return_value=True),
         patch.object(workflow, "resolve_executable", return_value="/usr/bin/pi"),
         patch.object(workflow.subprocess, "run", return_value=result) as run,
     ):
@@ -140,6 +141,9 @@ def test_summarize_with_pi_uses_noninteractive_mode_without_tools():
     assert "--print" in command
     assert "--no-tools" in command
     assert "--no-session" in command
+    assert "--no-skills" in command
+    assert command[command.index("--skill") + 1] == str(workflow.YOMIYASU_SKILL_DIR)
+    assert command[-1].startswith("/skill:yomiyasu\n")
     assert run.call_args.kwargs["timeout"] == workflow.PI_TIMEOUT_SECONDS
 
 
