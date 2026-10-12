@@ -6,6 +6,11 @@ uv = "latest"
 _.python.venv = { path = ".venv", create = true }
 SAMPLE = "Hello, sample!"
 
+[tasks.gemini-music]
+description = "GeminiのMP4をPyAVで音楽ファイルに変換 (ffmpeg CLI不要)"
+raw_args = true
+run = "uv run --locked python gemini_music_to_audio_pyav.py"
+
 [tasks.show-tools-extract_audio_info-audee]
 description = "audio_info_extractorのチェック用（audee）"
 run = '''
