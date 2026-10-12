@@ -22,38 +22,49 @@ def notion_helper():
         return helper
 
 def test_add_music_info_to_db(notion_helper):
-    """add_music_info_to_dbが正しい引数でnotion.pages.createを呼び出すかテスト"""
-    # --- 準備 (Arrange) ---
-    # テスト用のダミーデータ
     test_metadata = {
         "title": "Test Title",
         "artist": "Test Artist",
         "album": "Test Album",
-        "track": "1/10"
+        "album_artist": "Test Album Artist",
+        "track": "1/10",
     }
     test_file_path = "/path/to/dummy/file.m4a"
     test_db_id = "dummy_db_id"
+    tags_database_id = "dummy_tags_db_id"
+    notion_helper.notion.pages.create.return_value = {"id": "page-id"}
 
-    # --- 実行 (Act) ---
-    notion_helper.add_music_info_to_db(test_metadata, test_file_path, test_db_id)
+    with (
+        patch.object(
+            notion_helper,
+            "get_or_create_tag_page",
+            side_effect=["album-tag-id", "album-artist-tag-id"],
+        ) as get_or_create_tag_page,
+        patch.object(notion_helper, "upload_file") as upload_file,
+    ):
+        notion_helper.add_music_info_to_db(
+            test_metadata, test_file_path, test_db_id, tags_database_id
+        )
 
-    # --- 検証 (Assert) ---
-    # notion.pages.createが1回だけ呼び出されたことを確認
+    get_or_create_tag_page.assert_any_call(tags_database_id, "Test Album", "音楽")
+    get_or_create_tag_page.assert_any_call(
+        tags_database_id, "Test Album Artist", "音楽"
+    )
     notion_helper.notion.pages.create.assert_called_once()
-
-    # 呼び出し時の引数を取得
-    call_args, call_kwargs = notion_helper.notion.pages.create.call_args
-
-    # parent引数が正しいか検証
-    assert call_kwargs.get("parent") == {"database_id": test_db_id}
-
-    # properties引数が正しいか検証
-    properties = call_kwargs.get("properties", {})
+    call_kwargs = notion_helper.notion.pages.create.call_args.kwargs
+    assert call_kwargs["parent"] == {"database_id": test_db_id}
+    properties = call_kwargs["properties"]
     assert properties["タイトル"]["title"][0]["text"]["content"] == "Test Title"
-    assert properties["アーティスト"]["rich_text"][0]["text"]["content"] == "Test Artist"
-    assert properties["アルバム"]["rich_text"][0]["text"]["content"] == "Test Album"
     assert properties["No"]["rich_text"][0]["text"]["content"] == "1/10"
-    assert properties["ファイル"]["files"][0]["name"] == "file.m4a"
+    assert (
+        properties["トラックアーティスト"]["rich_text"][0]["text"]["content"]
+        == "Test Artist"
+    )
+    assert properties["アルバム"]["relation"] == [{"id": "album-tag-id"}]
+    assert properties["アルバムアーティスト"]["relation"] == [
+        {"id": "album-artist-tag-id"}
+    ]
+    upload_file.assert_called_once_with(page_id="page-id", file_path=test_file_path)
 
 
 def test_add_comment_posts_comment_to_page(notion_helper):
