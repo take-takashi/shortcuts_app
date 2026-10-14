@@ -164,11 +164,16 @@ async function run(options: CliOptions): Promise<void> {
 
   logger.info("自動ダウンロードを開始しました", { ...options, keywords });
   const client = new RadikoClient();
-  await client.authenticate();
+  const { areaCode } = await client.authenticate();
+  console.log(`Radiko判定エリア: ${areaCode}`);
+  logger.info("Radiko認証で判定されたエリア", { areaCode });
 
-  const stations = (await client.getStationList()).filter(
+  const stations = (await client.getStationList(areaCode)).filter(
     (station) => !options.excludeStationIds.includes(station.id),
   );
+  const stationSummary = stations.map(({ id, name }) => ({ id, name }));
+  console.log(`番組表の取得対象局 (${stations.length}局): ${stationSummary.map(({ id }) => id).join(", ")}`);
+  logger.info("番組表の取得対象局", { areaCode, stationCount: stations.length, stations: stationSummary });
   if (stations.length === 0) {
     throw new Error("利用可能な放送局が見つかりませんでした。");
   }

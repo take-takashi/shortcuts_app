@@ -41,6 +41,16 @@ mise run gemini-music ~/Downloads/Patterns_On_The_Glass.mp4 --format m4a --no-no
 
 この方法も内部ではFFmpegのライブラリを使いますが、PyAVのmacOS wheelには必要なライブラリが含まれるため、通常はHomebrew版FFmpegのインストールは不要です。変換テストでは`PATH`を空にしても動作することを確認しています。
 
+### MP4を5GiB以下に無劣化分割
+
+`pyav_split_by_5gib.py` は動画を再エンコードせず、キーフレーム位置で独立再生できるMP4に分割します。出力後にファイルサイズを確認し、上限を超えたパートは前のキーフレーム位置で再分割します。PyAVを使うためFFmpeg CLIは不要です。
+
+```bash
+mise run split-video-5gib ~/Movies/large.mp4
+```
+
+既定では入力と同じフォルダに `large_part001.mp4` のような名前で出力します。上限を変更する場合は `--max-size 4GiB`、出力先は `--output-dir ~/Movies/split`、既存パートを上書きする場合は `--force` を指定できます。キーフレーム間のデータ自体が上限を超える場合は、再エンコードなしでは分割できないためエラーになります。
+
 ## python用仮想環境の作成
 
 ```bash

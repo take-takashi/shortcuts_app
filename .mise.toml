@@ -11,6 +11,11 @@ description = "GeminiのMP4をPyAVで音楽ファイルに変換 (ffmpeg CLI不�
 raw_args = true
 run = "uv run --locked python gemini_music_to_audio_pyav.py"
 
+[tasks.split-video-5gib]
+description = "MP4をPyAVで5GiB以下に無劣化分割 (ffmpeg CLI不要)"
+raw_args = true
+run = "uv run --locked python pyav_split_by_5gib.py"
+
 [tasks.show-tools-extract_audio_info-audee]
 description = "audio_info_extractorのチェック用（audee）"
 run = '''
