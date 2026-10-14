@@ -1,3 +1,4 @@
+import json
 import subprocess
 from unittest.mock import Mock, patch
 
@@ -96,6 +97,48 @@ def test_fetch_page_content_extracts_main_text_and_removes_navigation():
     assert "Header noise" not in text
     assert "Footer noise" not in text
     assert "ignore this script" not in text
+
+
+def test_download_parses_json_escaped_yt_dlp_output():
+    title = 'A title with "quotes" and\na newline'
+    video_path = '/tmp/video "quoted".mp4'
+    output = "\n".join(
+        [
+            json.dumps(
+                {"event": "meta", "id": "video-id", "title": title},
+                ensure_ascii=False,
+            ),
+            json.dumps(
+                {
+                    "event": "done",
+                    "video_path": video_path,
+                    "video_name": 'video "quoted".mp4',
+                    "ext": "mp4",
+                },
+                ensure_ascii=False,
+            ),
+        ]
+    )
+    result = subprocess.CompletedProcess(
+        args=["yt-dlp"], returncode=0, stdout=output, stderr=""
+    )
+
+    with (
+        patch.dict("os.environ", {"YTDLP_COOKIES_FROM_BROWSER": ""}),
+        patch.object(workflow, "resolve_executable", return_value="/usr/bin/yt-dlp"),
+        patch.object(workflow.subprocess, "run", return_value=result) as run,
+    ):
+        videos = workflow.download_file("https://www.tiktok.com/video/123")
+
+    assert videos == [
+        workflow.VideoInfo(title, video_path, '/tmp/video "quoted".jpg', "mp4")
+    ]
+    command = run.call_args.args[0]
+    assert 'before_dl:{"event":"meta","id":%(id)j,"title":%(title)j}' in command
+    assert (
+        'after_move:{"event":"done","video_path":%(filepath)j,'
+        '"video_name":%(filename)j,"ext":%(ext)j}'
+    ) in command
 
 
 def test_download_retries_without_browser_cookies_when_macos_denies_access():

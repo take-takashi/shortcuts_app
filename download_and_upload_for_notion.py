@@ -190,9 +190,9 @@ def download_file(url: str, output_dir: str = "~/Downloads") -> list[VideoInfo]:
         "-o",
         "%(title)s.%(ext)s",
         "--print",
-        'before_dl:{"event":"meta","id":"%(id)s","title":"%(title)s"}',
+        'before_dl:{"event":"meta","id":%(id)j,"title":%(title)j}',
         "--print",
-        'after_move:{"event":"done","video_path":"%(filepath)s","video_name":"%(filename)s","thumb_path":"%(filepath)s.jpg", "ext":"%(ext)s"}',
+        'after_move:{"event":"done","video_path":%(filepath)j,"video_name":%(filename)j,"ext":%(ext)j}',
         url,
     ]
 
@@ -237,11 +237,11 @@ def download_file(url: str, output_dir: str = "~/Downloads") -> list[VideoInfo]:
         elif obj.get("event") == "done":
             video_path = obj["video_path"]
             video_name = obj["video_name"]
-            thumbnail_path = obj["thumb_path"]
             ext = obj["ext"]
             title = title or video_name
 
             # yt-dlpが出力する「動画名.ext.jpg」を「動画名.jpg」に直す。
+            thumbnail_path = f"{video_path}.jpg"
             suffix = f".{ext}.jpg"
             if thumbnail_path.endswith(suffix):
                 thumbnail_path = f"{thumbnail_path[:-len(suffix)]}.jpg"
