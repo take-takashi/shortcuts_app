@@ -1,8 +1,13 @@
 import json
+import shutil
 import subprocess
+from pathlib import Path
 from unittest.mock import Mock, patch
 
+import av
 import pytest
+from av.stream import Disposition
+from PIL import Image
 
 import download_and_upload_for_notion as workflow
 
@@ -99,7 +104,7 @@ def test_fetch_page_content_extracts_main_text_and_removes_navigation():
     assert "ignore this script" not in text
 
 
-def test_download_parses_json_escaped_yt_dlp_output():
+def test_parse_ytdlp_output_handles_json_escaped_values():
     title = 'A title with "quotes" and\na newline'
     video_path = '/tmp/video "quoted".mp4'
     output = "\n".join(
@@ -123,25 +128,134 @@ def test_download_parses_json_escaped_yt_dlp_output():
         args=["yt-dlp"], returncode=0, stdout=output, stderr=""
     )
 
+    assert workflow.parse_ytdlp_output(result) == (title, [Path(video_path)])
+
+
+def test_ytdlp_command_does_not_request_ffmpeg():
+    command = workflow.build_ytdlp_command(
+        "/usr/bin/yt-dlp",
+        "bv[ext=mp4]/bv",
+        Path("/tmp/download"),
+        "__video",
+        "https://www.tiktok.com/video/123",
+        write_thumbnail=True,
+    )
+
+    assert "--ffmpeg-location" not in command
+    assert "--embed-thumbnail" not in command
+    assert "--convert-thumbnails" not in command
+    assert "--write-thumbnail" in command
+
+
+def test_mux_media_embeds_thumbnail_without_external_ffmpeg(tmp_path):
+    thumbnail_path = tmp_path / "thumbnail.jpg"
+    output_path = tmp_path / "output.mp4"
+    Image.new("RGB", (320, 240), "red").save(thumbnail_path)
+
+    workflow.mux_media_with_thumbnail(
+        workflow.SCRIPT_DIR / "tests/cbr_test.mp4",
+        workflow.SCRIPT_DIR / "tests/sample.mp3",
+        thumbnail_path,
+        output_path,
+        "Title",
+    )
+
+    with av.open(str(output_path)) as container:
+        assert any(
+            stream.disposition & Disposition.attached_pic
+            for stream in container.streams
+        )
+        assert any(stream.type == "audio" for stream in container.streams)
+        assert any(
+            stream.type == "video"
+            and not stream.disposition & Disposition.attached_pic
+            for stream in container.streams
+        )
+
+
+@pytest.mark.parametrize("progressive", [False, True])
+def test_download_handles_tiktok_image_thumbnail(tmp_path, progressive):
+    """映像・音声別取得でも、一体型へのフォールバックでも.imageを扱う。"""
+    def fake_run_ytdlp(command, cookie_browser):
+        del cookie_browser
+        selector = command[command.index("-f") + 1]
+        if progressive and selector == "bv[ext=mp4]/bv":
+            raise subprocess.CalledProcessError(
+                1, command, stderr="Requested format is not available"
+            )
+
+        download_dir = Path(command[command.index("--paths") + 1])
+        if selector == "ba[ext=m4a]/ba":
+            media = download_dir / "Title.__audio.mp3"
+            shutil.copyfile(workflow.SCRIPT_DIR / "tests/sample.mp3", media)
+        else:
+            marker = "__combined" if progressive else "__video"
+            media = download_dir / f"Title.{marker}.mp4"
+            shutil.copyfile(workflow.SCRIPT_DIR / "tests/cbr_test.mp4", media)
+            # 再現したTikTokの実ファイルと同様に、拡張子.imageでJPEGを保存する。
+            Image.new("RGB", (32, 48), "red").save(
+                media.with_suffix(".image"), format="JPEG"
+            )
+        return subprocess.CompletedProcess(
+            command, 0,
+            stdout="\n".join([
+                json.dumps({"event": "meta", "title": "TikTok title"}),
+                json.dumps({"event": "done", "video_path": str(media)}),
+            ]),
+            stderr="",
+        )
+
     with (
-        patch.dict("os.environ", {"YTDLP_COOKIES_FROM_BROWSER": ""}),
-        patch.object(workflow, "resolve_executable", return_value="/usr/bin/yt-dlp"),
-        patch.object(workflow.subprocess, "run", return_value=result) as run,
+        patch.object(workflow, "resolve_executable", return_value="yt-dlp"),
+        patch.object(workflow, "run_ytdlp", side_effect=fake_run_ytdlp) as run,
+        patch.object(
+            workflow.subprocess, "run", side_effect=AssertionError("外部コマンドは禁止")
+        ),
     ):
-        videos = workflow.download_file("https://www.tiktok.com/video/123")
+        videos = workflow.download_file("https://vt.tiktok.com/test/", str(tmp_path))
 
-    assert videos == [
-        workflow.VideoInfo(title, video_path, '/tmp/video "quoted".jpg', "mp4")
-    ]
-    command = run.call_args.args[0]
-    assert 'before_dl:{"event":"meta","id":%(id)j,"title":%(title)j}' in command
-    assert (
-        'after_move:{"event":"done","video_path":%(filepath)j,'
-        '"video_name":%(filename)j,"ext":%(ext)j}'
-    ) in command
+    assert run.call_count == 2
+    assert len(videos) == 1
+    assert videos[0].video_title == "TikTok title"
+    thumbnail = Path(videos[0].thumbnail_filepath)
+    assert thumbnail.suffix == ".jpg"
+    with Image.open(thumbnail) as image:
+        assert image.format == "JPEG"
+        assert image.size == (32, 48)
+    with av.open(videos[0].video_filepath) as container:
+        cover = next(
+            stream for stream in container.streams.video
+            if stream.disposition & Disposition.attached_pic
+        )
+        assert sum(1 for _ in container.decode(cover)) == 1
+    assert not list(tmp_path.glob(".shortcuts-ytdlp-*"))
 
 
-def test_download_retries_without_browser_cookies_when_macos_denies_access():
+def test_select_downloaded_media_excludes_image_thumbnail(tmp_path):
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"video")
+    thumbnail = tmp_path / "video.image"
+    Image.new("RGB", (16, 16)).save(thumbnail, format="JPEG")
+
+    assert workflow.find_thumbnail(tmp_path) == thumbnail
+    assert workflow.select_downloaded_media([video, thumbnail], "動画") == video
+
+
+def test_move_thumbnail_normalizes_non_jpeg_images(tmp_path):
+    source = tmp_path / "thumbnail.png"
+    Image.new("RGBA", (3, 5), (255, 0, 0, 128)).save(source)
+
+    destination = workflow.move_thumbnail(source, tmp_path, "video")
+
+    assert destination == tmp_path / "video.jpg"
+    assert destination.is_file()
+    assert not source.exists()
+    with Image.open(destination) as image:
+        assert image.format == "JPEG"
+        assert image.size == (3, 5)
+
+
+def test_run_ytdlp_retries_without_browser_cookies_when_macos_denies_access():
     cookie_error = subprocess.CalledProcessError(
         1,
         "yt-dlp",
@@ -153,15 +267,12 @@ def test_download_retries_without_browser_cookies_when_macos_denies_access():
     success = subprocess.CompletedProcess(
         args=["yt-dlp"], returncode=0, stdout="", stderr=""
     )
+    command = ["/usr/bin/yt-dlp", "-f", "best", "https://example.com/video"]
 
-    with (
-        patch.dict("os.environ", {"YTDLP_COOKIES_FROM_BROWSER": "safari"}),
-        patch.object(workflow, "resolve_executable", return_value="/usr/bin/yt-dlp"),
-        patch.object(
-            workflow.subprocess, "run", side_effect=[cookie_error, success]
-        ) as run,
-    ):
-        assert workflow.download_file("https://www.tiktok.com/video/123") == []
+    with patch.object(
+        workflow.subprocess, "run", side_effect=[cookie_error, success]
+    ) as run:
+        assert workflow.run_ytdlp(command, "safari") is success
 
     assert run.call_count == 2
     assert "--cookies-from-browser" in run.call_args_list[0].args[0]

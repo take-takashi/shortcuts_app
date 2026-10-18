@@ -1,8 +1,8 @@
-import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+import MyNotionHelper.my_notion_helper as notion_module
 from MyNotionHelper.my_notion_helper import MyNotionHelper
 
 
@@ -20,6 +20,56 @@ def notion_helper():
         # ヘルパーにモッククライアントを注入
         helper.notion = mock_instance
         return helper
+
+
+def test_upload_video_keeps_small_file_as_one_upload(notion_helper, tmp_path):
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"video")
+
+    with patch.object(notion_helper, "upload_file") as upload_file:
+        notion_helper.upload_video("page-id", str(video))
+
+    upload_file.assert_called_once_with("page-id", str(video.resolve()))
+
+
+def test_upload_video_splits_large_file_and_uploads_parts_to_same_page(
+    notion_helper, tmp_path
+):
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"video")
+    parts = []
+
+    def fake_split(source_path, *, output_dir, max_size):
+        del source_path, max_size
+        parts.extend(
+            [
+                output_dir / "video_part001.mp4",
+                output_dir / "video_part002.mp4",
+            ]
+        )
+        for part in parts:
+            part.write_bytes(b"part")
+        return parts
+
+    with (
+        patch.object(notion_module, "NOTION_MAX_VIDEO_SIZE", 1),
+        patch.object(notion_module, "NOTION_VIDEO_SPLIT_SIZE", 123),
+        patch.object(notion_module, "split_video", side_effect=fake_split) as split,
+        patch.object(notion_helper, "upload_file") as upload_file,
+    ):
+        notion_helper.upload_video("page-id", str(video))
+
+    split.assert_called_once_with(
+        video.resolve(),
+        output_dir=split.call_args.kwargs["output_dir"],
+        max_size=123,
+    )
+    assert not split.call_args.kwargs["output_dir"].exists()
+    assert upload_file.call_args_list == [
+        call("page-id", str(parts[0])),
+        call("page-id", str(parts[1])),
+    ]
+
 
 def test_add_music_info_to_db(notion_helper):
     test_metadata = {

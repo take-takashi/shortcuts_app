@@ -3,14 +3,19 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 from urllib.parse import unquote, urlsplit
 
+import av
 import requests
+from av.stream import Disposition
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+from PIL import Image
 
 from MyLoggerHelper import MyLoggerHelper
 from MyNotionHelper import MyNotionHelper
@@ -158,51 +163,77 @@ def normalize_tokiomotion_url(url: str) -> str:
     return url
 
 
+# TikTokのサムネイルは、実体がJPEGでもyt-dlpが.imageで保存することがある。
+# 画像のデコード・JPEGへの正規化は拡張子ではなくPillowの形式判定で行う。
+IMAGE_SUFFIXES = frozenset(
+    {".avif", ".avifs", ".gif", ".image", ".jpeg", ".jpg", ".png", ".webp"}
+)
+
+
 def is_browser_cookie_access_error(error: subprocess.CalledProcessError) -> bool:
     stderr = error.stderr or ""
     return "Operation not permitted" in stderr and "Cookies.binarycookies" in stderr
 
 
-def download_file(url: str, output_dir: str = "~/Downloads") -> list[VideoInfo]:
-    """yt-dlpで動画とサムネイルをダウンロードして情報を返す。"""
-    output_dir = os.path.expanduser(output_dir)
-    ytdlp_path = resolve_executable(
-        "yt-dlp",
-        "YTDLP_EXECUTABLE",
-        ("/opt/homebrew/bin/yt-dlp", "/usr/local/bin/yt-dlp"),
+def is_format_unavailable_error(error: subprocess.CalledProcessError) -> bool:
+    stderr = (error.stderr or "").lower()
+    return (
+        "requested format is not available" in stderr
+        or "no video formats found" in stderr
+        or "no formats found" in stderr
     )
 
-    ytdlp_cmd = [
+
+def build_ytdlp_command(
+    ytdlp_path: str,
+    format_selector: str,
+    output_dir: Path,
+    output_marker: str,
+    url: str,
+    write_thumbnail: bool = False,
+) -> list[str]:
+    """FFmpegを使わないyt-dlpダウンロードコマンドを組み立てる。"""
+    command = [
         ytdlp_path,
         "--no-simulate",
+        "--no-playlist",
         "-f",
-        "bv[ext=mp4]+ba[ext=m4a]/bv+ba/best[ext=mp4]/best",
-        "--write-thumbnail",
-        "--embed-thumbnail",
-        "--convert-thumbnails",
-        "jpg",
+        format_selector,
         "--trim-filename",
         "80",
         "--age-limit",
         "1985",
         "--paths",
-        output_dir,
+        str(output_dir),
         "-o",
-        "%(title)s.%(ext)s",
+        f"%(title)s.{output_marker}.%(ext)s",
         "--print",
         'before_dl:{"event":"meta","id":%(id)j,"title":%(title)j}',
         "--print",
         'after_move:{"event":"done","video_path":%(filepath)j,"video_name":%(filename)j,"ext":%(ext)j}',
-        url,
     ]
+    if write_thumbnail:
+        command.append("--write-thumbnail")
+    command.append(url)
+    return command
 
-    # 空文字ならブラウザーCookieを使わない。デフォルトは従来どおりSafari。
-    cookie_browser = os.getenv("YTDLP_COOKIES_FROM_BROWSER", "safari").strip()
-    if cookie_browser:
-        ytdlp_cmd[-1:-1] = ["--cookies-from-browser", cookie_browser]
 
+def add_cookie_browser(command: list[str], cookie_browser: str) -> list[str]:
+    if not cookie_browser:
+        return command.copy()
+    return [*command[:-1], "--cookies-from-browser", cookie_browser, command[-1]]
+
+
+def run_ytdlp(command: list[str], cookie_browser: str) -> subprocess.CompletedProcess:
+    """yt-dlpを実行し、Safari Cookieの権限エラー時だけCookieなしで再試行する。"""
+    command_with_cookies = add_cookie_browser(command, cookie_browser)
     try:
-        result = subprocess.run(ytdlp_cmd, capture_output=True, text=True, check=True)
+        return subprocess.run(
+            command_with_cookies,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
     except subprocess.CalledProcessError as error:
         if not cookie_browser or not is_browser_cookie_access_error(error):
             logger.error("yt-dlp stdout:\n%s", error.stdout)
@@ -213,42 +244,283 @@ def download_file(url: str, output_dir: str = "~/Downloads") -> list[VideoInfo]:
             "ブラウザーのCookieにアクセスできないため、Cookieなしで再試行します。"
             "ログインが必要な動画はダウンロードできない場合があります。"
         )
-        retry_command = ytdlp_cmd.copy()
-        cookie_option_index = retry_command.index("--cookies-from-browser")
-        del retry_command[cookie_option_index : cookie_option_index + 2]
+        retry_command = add_cookie_browser(command, "")
         try:
-            result = subprocess.run(
-                retry_command, capture_output=True, text=True, check=True
+            return subprocess.run(
+                retry_command,
+                capture_output=True,
+                text=True,
+                check=True,
             )
         except subprocess.CalledProcessError as retry_error:
             logger.error("yt-dlp stdout:\n%s", retry_error.stdout)
             logger.error("yt-dlp stderr:\n%s", retry_error.stderr)
             raise
 
-    title = None
-    videos: list[VideoInfo] = []
 
-    for line in result.stdout.splitlines():
-        if not line.strip().startswith("{"):
+def parse_ytdlp_output(
+    result: subprocess.CompletedProcess,
+) -> tuple[str | None, list[Path]]:
+    """yt-dlpのJSON出力からタイトルとダウンロード済みファイルを取得する。"""
+    title = None
+    paths: list[Path] = []
+    for line in (result.stdout or "").splitlines():
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
             continue
-        obj = json.loads(line)
         if obj.get("event") == "meta":
             title = obj.get("title")
-        elif obj.get("event") == "done":
-            video_path = obj["video_path"]
-            video_name = obj["video_name"]
-            ext = obj["ext"]
-            title = title or video_name
+        elif obj.get("event") == "done" and obj.get("video_path"):
+            paths.append(Path(obj["video_path"]))
+    return title, paths
 
-            # yt-dlpが出力する「動画名.ext.jpg」を「動画名.jpg」に直す。
-            thumbnail_path = f"{video_path}.jpg"
-            suffix = f".{ext}.jpg"
-            if thumbnail_path.endswith(suffix):
-                thumbnail_path = f"{thumbnail_path[:-len(suffix)]}.jpg"
 
-            videos.append(VideoInfo(title, video_path, thumbnail_path, ext))
+def select_downloaded_media(paths: list[Path], label: str) -> Path:
+    media_paths = [path for path in paths if path.suffix.lower() not in IMAGE_SUFFIXES]
+    if not media_paths:
+        raise RuntimeError(f"yt-dlpから{label}ファイルのパスを取得できませんでした。")
+    media_path = media_paths[-1]
+    if not media_path.is_file():
+        raise FileNotFoundError(f"ダウンロードした{label}が見つかりません: {media_path}")
+    return media_path
 
-    return videos
+
+def find_thumbnail(output_dir: Path) -> Path:
+    thumbnails = [
+        path
+        for path in output_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
+    ]
+    if not thumbnails:
+        raise FileNotFoundError("ダウンロード先に対応するサムネイルファイルが見つかりません。")
+    return thumbnails[-1]
+
+
+def output_stem(media_path: Path) -> str:
+    for marker in (".__video", ".__combined"):
+        if marker in media_path.name:
+            return media_path.name.rsplit(marker, 1)[0]
+    return media_path.stem
+
+
+def add_mux_stream_from_template(
+    output_container: Any,
+    input_stream: Any,
+) -> Any:
+    """入力ストリームを再エンコードせずmuxするための出力ストリームを作る。"""
+    codec = input_stream.codec_context.codec
+    codec_name = codec.canonical_name if codec else input_stream.codec_context.name
+    decoder_name = codec.name if codec else codec_name
+
+    if decoder_name == codec_name:
+        output_stream = output_container.add_stream_from_template(input_stream)
+    elif input_stream.type == "video":
+        output_stream = output_container.add_mux_stream(
+            codec_name,
+            rate=input_stream.average_rate,
+            width=input_stream.width,
+            height=input_stream.height,
+            time_base=input_stream.time_base,
+        )
+    else:
+        output_stream = output_container.add_mux_stream(
+            codec_name,
+            rate=input_stream.sample_rate if input_stream.type == "audio" else None,
+            time_base=input_stream.time_base,
+        )
+
+    output_stream.disposition = input_stream.disposition
+    output_stream.metadata.update(input_stream.metadata)
+    return output_stream
+
+
+def add_thumbnail_stream(
+    output_container: Any,
+    thumbnail_path: Path,
+) -> None:
+    """サムネイルをMP4のattached pictureストリームとして追加する。"""
+    with Image.open(thumbnail_path) as source_image:
+        image = source_image.convert("RGB")
+
+    if image.width < 2 or image.height < 2:
+        raise ValueError(f"サムネイルのサイズが小さすぎます: {thumbnail_path}")
+
+    # JPEGのYUV変換で扱いやすいよう、奇数サイズを切り詰める。
+    width = image.width - image.width % 2
+    height = image.height - image.height % 2
+    if (width, height) != image.size:
+        image = image.crop((0, 0, width, height))
+
+    cover_stream = output_container.add_stream("mjpeg", rate=1)
+    cover_stream.width = image.width
+    cover_stream.height = image.height
+    cover_stream.pix_fmt = "yuvj420p"
+    cover_stream.disposition = Disposition.attached_pic
+
+    frame = av.VideoFrame.from_image(image)
+    frame.pts = 0
+    for packet in cover_stream.encode(frame):
+        output_container.mux(packet)
+    for packet in cover_stream.encode(None):
+        output_container.mux(packet)
+
+
+def mux_media_with_thumbnail(
+    video_path: Path,
+    audio_path: Path | None,
+    thumbnail_path: Path,
+    output_path: Path,
+    title: str,
+) -> None:
+    """映像・音声を再エンコードせずmuxし、サムネイルを埋め込む。"""
+    output_path.unlink(missing_ok=True)
+    try:
+        with ExitStack() as stack:
+            video_input = stack.enter_context(av.open(str(video_path)))
+            audio_input = (
+                stack.enter_context(av.open(str(audio_path))) if audio_path else None
+            )
+            output = stack.enter_context(
+                av.open(str(output_path), mode="w", format="mp4")
+            )
+            output.metadata.update(video_input.metadata)
+            output.metadata["title"] = title
+            stream_map: dict[tuple[int, int], Any] = {}
+
+            for input_container in (video_input, audio_input):
+                if input_container is None:
+                    continue
+                for input_stream in input_container.streams:
+                    if input_stream.type not in {"audio", "video"}:
+                        continue
+                    if input_stream.disposition & Disposition.attached_pic:
+                        continue
+                    output_stream = add_mux_stream_from_template(output, input_stream)
+                    stream_map[(id(input_container), input_stream.index)] = output_stream
+
+            add_thumbnail_stream(output, thumbnail_path)
+
+            for input_container in (video_input, audio_input):
+                if input_container is None:
+                    continue
+                for packet in input_container.demux():
+                    key = (id(input_container), packet.stream.index)
+                    output_stream = stream_map.get(key)
+                    if output_stream is None:
+                        continue
+                    if packet.dts is None and packet.pts is None:
+                        continue
+                    packet.stream = output_stream
+                    output.mux(packet)
+    except Exception:
+        output_path.unlink(missing_ok=True)
+        raise
+
+
+def move_thumbnail(thumbnail_path: Path, output_dir: Path, stem: str) -> Path:
+    """サムネイルをJPEGへ正規化して、動画と同じ場所へ移動する。"""
+    destination = output_dir / f"{stem}.jpg"
+    destination.unlink(missing_ok=True)
+    with Image.open(thumbnail_path) as source_image:
+        source_image.convert("RGB").save(destination, format="JPEG", quality=95)
+    thumbnail_path.unlink(missing_ok=True)
+    return destination
+
+
+def download_progressive_file(
+    ytdlp_path: str,
+    url: str,
+    temp_dir: Path,
+    output_dir: Path,
+    cookie_browser: str,
+) -> list[VideoInfo]:
+    """映像・音声一体型の形式を取得し、サムネイルだけPyAVで埋め込む。"""
+    command = build_ytdlp_command(
+        ytdlp_path,
+        "best[ext=mp4]/best",
+        temp_dir,
+        "__combined",
+        url,
+        write_thumbnail=True,
+    )
+    result = run_ytdlp(command, cookie_browser)
+    title, paths = parse_ytdlp_output(result)
+    media_path = select_downloaded_media(paths, "動画")
+    thumbnail_path = find_thumbnail(temp_dir)
+    title = title or output_stem(media_path)
+    stem = output_stem(media_path)
+    output_path = output_dir / f"{stem}.mp4"
+    mux_media_with_thumbnail(media_path, None, thumbnail_path, output_path, title)
+    final_thumbnail = move_thumbnail(thumbnail_path, output_dir, stem)
+    return [VideoInfo(title, str(output_path), str(final_thumbnail), "mp4")]
+
+
+def download_file(url: str, output_dir: str = "~/Downloads") -> list[VideoInfo]:
+    """yt-dlpとPyAVで動画を取得・muxし、サムネイルを埋め込む。"""
+    output_dir_path = Path(os.path.expanduser(output_dir))
+    output_dir_path.mkdir(parents=True, exist_ok=True)
+    ytdlp_path = resolve_executable(
+        "yt-dlp",
+        "YTDLP_EXECUTABLE",
+        ("/opt/homebrew/bin/yt-dlp", "/usr/local/bin/yt-dlp"),
+    )
+    cookie_browser = os.getenv("YTDLP_COOKIES_FROM_BROWSER", "safari").strip()
+
+    with tempfile.TemporaryDirectory(
+        prefix=".shortcuts-ytdlp-", dir=output_dir_path
+    ) as temporary_directory:
+        temp_dir = Path(temporary_directory)
+        video_command = build_ytdlp_command(
+            ytdlp_path,
+            "bv[ext=mp4]/bv",
+            temp_dir,
+            "__video",
+            url,
+            write_thumbnail=True,
+        )
+        audio_command = build_ytdlp_command(
+            ytdlp_path,
+            "ba[ext=m4a]/ba",
+            temp_dir,
+            "__audio",
+            url,
+        )
+
+        try:
+            video_result = run_ytdlp(video_command, cookie_browser)
+            audio_result = run_ytdlp(audio_command, cookie_browser)
+        except subprocess.CalledProcessError as error:
+            if not is_format_unavailable_error(error):
+                raise
+            logger.warning(
+                "映像と音声を別々に取得できないため、一体型の形式に切り替えます。"
+            )
+            return download_progressive_file(
+                ytdlp_path,
+                url,
+                temp_dir,
+                output_dir_path,
+                cookie_browser,
+            )
+
+        title, video_paths = parse_ytdlp_output(video_result)
+        _, audio_paths = parse_ytdlp_output(audio_result)
+        video_path = select_downloaded_media(video_paths, "映像")
+        audio_path = select_downloaded_media(audio_paths, "音声")
+        thumbnail_path = find_thumbnail(temp_dir)
+        title = title or output_stem(video_path)
+        stem = output_stem(video_path)
+        output_path = output_dir_path / f"{stem}.mp4"
+        mux_media_with_thumbnail(
+            video_path,
+            audio_path,
+            thumbnail_path,
+            output_path,
+            title,
+        )
+        final_thumbnail = move_thumbnail(thumbnail_path, output_dir_path, stem)
+        return [VideoInfo(title, str(output_path), str(final_thumbnail), "mp4")]
 
 
 def process_ytdlp_item(notion: MyNotionHelper, item: dict, url: str) -> None:

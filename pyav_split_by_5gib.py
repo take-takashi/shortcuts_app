@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
 from bisect import bisect_left, bisect_right
+from typing import Any
 
 import av
 from av.container.output import OutputContainer
@@ -77,7 +78,7 @@ def parse_size(value: str) -> int:
 
 def _usable_packet(packet: av.Packet) -> bool:
     # demux() emits a zero-sized flush packet for each stream at EOF.
-    return packet.dts is not None and packet.size > 0
+    return packet.size > 0 and (packet.dts is not None or packet.pts is not None)
 
 
 def _packet_time(packet: av.Packet) -> tuple[Fraction | None, Fraction]:
@@ -88,6 +89,34 @@ def _packet_time(packet: av.Packet) -> tuple[Fraction | None, Fraction]:
     timestamp_time = Fraction(timestamp) * time_base if timestamp is not None else None
     duration = Fraction(packet.duration) * time_base if packet.duration else Fraction(0)
     return timestamp_time, duration
+
+
+def _add_stream_for_mux(output: OutputContainer, input_stream: Any) -> Any:
+    """Add a stream for packet-copy muxing, including decoder-only codecs."""
+    codec = input_stream.codec_context.codec
+    codec_name = codec.canonical_name if codec else input_stream.codec_context.name
+    decoder_name = codec.name if codec else codec_name
+
+    if decoder_name == codec_name:
+        output_stream = output.add_stream_from_template(input_stream)
+    elif input_stream.type == "video":
+        output_stream = output.add_mux_stream(
+            codec_name,
+            rate=input_stream.average_rate,
+            width=input_stream.width,
+            height=input_stream.height,
+            time_base=input_stream.time_base,
+        )
+    else:
+        output_stream = output.add_mux_stream(
+            codec_name,
+            rate=input_stream.sample_rate if input_stream.type == "audio" else None,
+            time_base=input_stream.time_base,
+        )
+
+    output_stream.metadata.update(input_stream.metadata)
+    output_stream.disposition = input_stream.disposition
+    return output_stream
 
 
 def inspect_input(input_path: Path) -> InputInfo:
@@ -279,16 +308,26 @@ def _write_parts(
             output.metadata.update(source.metadata)
             stream_map: dict[int, Stream] = {}
             for input_stream in source.streams:
-                output_stream = output.add_stream_from_template(input_stream)
-                output_stream.metadata.update(input_stream.metadata)
-                output_stream.disposition = input_stream.disposition
-                stream_map[input_stream.index] = output_stream
+                stream_map[input_stream.index] = _add_stream_for_mux(
+                    output, input_stream
+                )
             outputs.append(output)
             stream_maps.append(stream_map)
 
+        attached_picture_indices = {
+            stream.index
+            for stream in source.streams.video
+            if stream.disposition & Disposition.attached_pic
+        }
         video_packet_index = 0
         for packet in source.demux():
-            if not _usable_packet(packet):
+            if packet.size <= 0:
+                continue
+            if (
+                packet.stream.index not in attached_picture_indices
+                and packet.dts is None
+                and packet.pts is None
+            ):
                 continue
             if packet.stream.index == info.video_stream_index:
                 part_index = bisect_right(cut_video_indices, video_packet_index)
@@ -299,8 +338,17 @@ def _write_parts(
                     ranges[part_index][2],
                 )
                 video_packet_index += 1
+            elif packet.stream.index in attached_picture_indices:
+                # Attachments belong in every standalone part and always start at 0.
+                for output, stream_map in zip(outputs, stream_maps, strict=True):
+                    _mux_packet(
+                        packet,
+                        output,
+                        stream_map[packet.stream.index],
+                        Fraction(0),
+                    )
             elif packet.stream.type == "video":
-                # Attached pictures (if present) belong in every standalone part.
+                # Other non-primary video streams belong in every standalone part.
                 for part_index, (output, stream_map, part_range) in enumerate(
                     zip(outputs, stream_maps, ranges, strict=True)
                 ):

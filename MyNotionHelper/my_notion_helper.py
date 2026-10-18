@@ -2,14 +2,20 @@ import concurrent.futures
 import json
 import logging
 import os
+import tempfile
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import requests
 from notion_client import Client
 
-from MyFfmpegHelper import MyFfmpegHelper
+from pyav_split_by_5gib import split_video
+
+
+NOTION_MAX_VIDEO_SIZE = 5 * 1024**3
+NOTION_VIDEO_SPLIT_SIZE = NOTION_MAX_VIDEO_SIZE - 100 * 1024**2
 
 
 @dataclass
@@ -602,36 +608,50 @@ class MyNotionHelper:
     def upload_video(self, page_id: str, file_path: str):
         """
         指定したNotionページに動画をアップロードします。
-        5GiBを超える動画はFFMPEGで分割してアップロードします。
+        5GiBを超える動画はPyAVで分割し、同じページへ順番にアップロードします。
 
         引数:
             page_id (str): ファイルをアップロードするNotionページのID。
             file_path (str): アップロードするファイルのパス。
 
         例外:
-            Exception: ファイルアップロードに失敗した場合に発生します。
+            Exception: ファイルアップロードまたは分割に失敗した場合に発生します。
 
         戻り値:
             なし
         """
-        # ファイルの存在を確認
         if not os.path.isfile(file_path):
             raise Exception(f"File not found: {file_path}")
 
-        files: list[str] = []
+        source_path = Path(file_path).expanduser().resolve()
+        if source_path.stat().st_size <= NOTION_MAX_VIDEO_SIZE:
+            self.upload_file(page_id, str(source_path))
+            return
 
-        # ファイルサイズが5GiBを超えていたらファイルを分割する
-        if os.path.getsize(file_path) > 5 * 1024 * 1024 * 1024:
-            split_size = (5 * 1024**3) - (1024**2 * 100)  # 5GiBとマージン
-            files = MyFfmpegHelper.split_video_lossless_by_keyframes(
-                file_path, split_size_bytes=split_size
+        self.logger.info(
+            "動画がNotionの5GiB上限を超えているため、PyAVで分割します: %s",
+            source_path,
+        )
+        with tempfile.TemporaryDirectory(
+            prefix=".notion-video-parts-",
+            dir=str(source_path.parent),
+        ) as temporary_directory:
+            part_paths = split_video(
+                source_path,
+                output_dir=Path(temporary_directory),
+                max_size=NOTION_VIDEO_SPLIT_SIZE,
             )
-        else:
-            files.append(file_path)
+            self.logger.info("動画を%d個のパートに分割しました。", len(part_paths))
 
-        # files分、ファイルをアップロードする
-        for file in files:
-            self.upload_file(page_id, file)
+            # 同じpage_idにpart001, part002...の順で追加する。
+            for index, part_path in enumerate(part_paths, start=1):
+                self.logger.info(
+                    "Notionページへ動画パートをアップロード中 (%d/%d): %s",
+                    index,
+                    len(part_paths),
+                    part_path.name,
+                )
+                self.upload_file(page_id, str(part_path))
 
     # ファイルパスを渡して拡張子からMIMEタイプを返す関数
     def get_mime_type_from_extension(self, file_path: str) -> MimeTypeInfo:

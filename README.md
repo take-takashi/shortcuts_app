@@ -2,6 +2,33 @@
 
 Mac, iOSのショートカット.appで使うスクリプトなどをまとめる
 
+## メッセージからNotion処理を起動
+
+`message_automation.py` は `MAC|auto:notion` と `MAC|health` だけを受け付けます。メッセージをシェルのコマンドとして実行することはありません。
+
+ショートカットの「シェルスクリプトを実行」で入力を「引数として」渡し、ログの保存先を指定します。既存の起動設定でも、同じ環境変数を設定すれば利用できます。
+
+```zsh
+export MESSAGE_AUTOMATION_LOG_DIR="$HOME/Downloads"
+"$HOME/github/shortcuts_app/.venv/bin/python" \
+  "$HOME/github/shortcuts_app/message_automation.py" "$@"
+```
+
+- `MAC|auto:notion`: 本処理をバックグラウンド起動し、すぐに `STARTED pid=...` を返します。これは**起動受付**であり、処理完了ではありません。
+- 処理中の再実行: `ALREADY_RUNNING` を返し、追加の処理は起動しません。
+- `MAC|health`: `OK` を返します。Notion処理やCookieの診断は行いません。
+
+ログは指定したディレクトリへ追記します。未指定の場合は `~/Library/Logs/shortcuts_app` を使います。ログを作成できない場合は、エラーを返して起動しません。
+
+| ファイル | 内容 |
+| --- | --- |
+| `message_automation-YYYYMMDD.log` | 受付・重複起動のスキップ・本処理の開始・完了・失敗、PID、終了コード |
+| `message_automation-notion-YYYYMMDD.log` | 本処理の標準出力・標準エラー（例外など） |
+
+バックグラウンド処理の標準入出力はShortcutsから切り離します。完了・失敗は通知ではなくログで確認してください。本処理側の `download_and_upload_for_notion-YYYYMMDD.log` も従来どおり出力されます。
+
+重複起動防止には `~/Library/Application Support/shortcuts_app/auto-notion.lock` のOSロックを使います。ログの出力先を変更しても重複起動は防止されます。終了後はロックが自動解放されるため、残ったロックファイルを削除する必要はありません。この制御は `message_automation.py` 経由の起動が対象です。
+
 ## Geminiで作成した音楽の変換
 
 `gemini_music_to_audio.py` は、GeminiからダウンロードしたMP4を、音量調整・タグ・カバー画像付きの音楽ファイルにします。Pythonの追加パッケージは不要ですが、`ffmpeg` と `ffprobe` が必要です。

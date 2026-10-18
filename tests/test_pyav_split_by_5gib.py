@@ -5,6 +5,7 @@ from fractions import Fraction
 from pathlib import Path
 
 import av
+from av.stream import Disposition
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -23,6 +24,20 @@ def _make_test_mp4(path: Path) -> None:
 
         audio = output.add_stream("aac", rate=48_000)
         audio.layout = "stereo"
+
+        cover = output.add_stream("mjpeg", rate=1)
+        cover.width = 16
+        cover.height = 16
+        cover.pix_fmt = "yuvj420p"
+        cover.disposition = Disposition.attached_pic
+        cover_frame = av.VideoFrame(16, 16, "rgb24")
+        for plane in cover_frame.planes:
+            plane.update(bytes(plane.buffer_size))
+        cover_frame.pts = 0
+        for packet in cover.encode(cover_frame):
+            output.mux(packet)
+        for packet in cover.encode(None):
+            output.mux(packet)
 
         for frame_index in range(50):
             frame = av.VideoFrame(128, 128, "yuv420p")
@@ -96,3 +111,13 @@ def test_splits_on_keyframes_without_reencoding(tmp_path: Path):
         assert sum(_decoded_frames(path, stream_type) for path in outputs) == _decoded_frames(
             source, stream_type
         )
+
+    for path in outputs:
+        with av.open(str(path)) as container:
+            attached_pictures = [
+                stream
+                for stream in container.streams.video
+                if stream.disposition & Disposition.attached_pic
+            ]
+            assert len(attached_pictures) == 1
+            assert sum(1 for _ in container.decode(attached_pictures[0])) == 1
