@@ -37,13 +37,24 @@ Team aikoでは、ログイン済みのページにあるVimeo埋め込みURLを
 
 ## Team aikoの保存形式
 
-- 出力は `{番組名}_{エピソード名}.m4a`。配信日を取得できた場合は番組名の後に日付を入れます。
+- サイトの一覧ページにある公開日を配信日として使います。Vimeoへのアップロード日やダウンロードした日ではありません。
+- 音声タグのタイトルは `YYYY-MM-DD エピソード名`、日付タグは `YYYY-MM-DD`、ファイル名は `{番組名}_{YYYYMMDD}_{エピソード名}.m4a` です。
+- 例: タイトルは `2026-10-08 あじがとレディオ#232`、ファイル名は `あじがとレディオ_20261008_あじがとレディオ#232.m4a` になります。
 - 音声専用HLSのAACパケットをPyAVでコピーします。再エンコードや音量調整をしないため、追加の音質劣化はありません。
 - タイトル・アーティスト・番組名のタグと、取得できたカバー画像を埋め込みます。
 - この処理には `yt-dlp`・`ffmpeg` CLI・`ffprobe` CLIは不要です。既存サイトのMP3タグ付けには従来どおり `ffmpeg` CLIを使います。
 - 同名のM4Aがある場合はエラーにします。明示的に上書きする場合だけ `--overwrite` を追加します。
 - 暗号化配信、ライブ配信、AAC以外の音声、音声専用HLSがない動画には対応していません。
 - 通信エラーや配信情報と長さが一致しない場合は、M4Aを完成品として残しません。エラー時の終了コードは1です。
+
+公開日は対象回のページURL（記事ID）で照合します。HTMLファイル入力で元ページのURLが分からない場合は、一覧上のエピソード名の完全一致で探します。過去回は一覧のページ送りをたどります。
+取得できない場合は日付を推測せずエラーにします。サイトで日付を確認できた場合は、次のように手動指定できます。
+
+```bash
+mise run download-safari-audio --download_dir "$HOME/Downloads" --broadcast-date 2026-10-08
+```
+
+この変更前に保存した日付なしのファイルは、自動で改名・削除しません。再実行すると日付付きの別ファイルを保存します。
 
 Vimeoの配信URLには有効期限があります。失敗時はSafariでページを開き直して再実行してください。
 配信設定の解析は自前実装のため、Vimeoの仕様変更で修正が必要になる場合があります。
@@ -67,8 +78,8 @@ VimeoへのRefererを明示する場合は `--page-url 'https://sp.aiko.pcan.us/
 ## テスト
 
 ```bash
-uv run --locked python -m pytest tests/test_vimeo_audio.py tests/test_download_audio_from_html.py
+uv run --locked python -m pytest tests/test_vimeo_audio.py tests/test_team_aiko_publish_date.py tests/test_download_audio_from_html.py
 ```
 
 テストはダミーのページ情報とPyAVで生成した音声を使い、会員サイトへの接続は行いません。
-AACパケットの一致、HTTP経由の分割HLS取得とReferer、タグ・カバー、既存MP3処理、失敗時の後片付けを確認します。
+公開日の照合・ページ送り・手動指定、AACパケットの一致、HTTP経由の分割HLS取得とReferer、タグ・カバー、既存MP3処理、失敗時の後片付けを確認します。

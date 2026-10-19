@@ -47,7 +47,7 @@ def test_pyav_copies_aac_bit_for_bit_with_tags_and_cover(aac_file, tmp_path, mon
     destination = tmp_path / "output.m4a"
     MyFfmpegHelper.save_aac_as_m4a(
         str(aac_file), str(destination),
-        {"title": "あじがとレディオ#232", "artist": "aiko", "album": "あじがとレディオ"},
+        {"title": "あじがとレディオ#232", "artist": "aiko", "album": "あじがとレディオ", "date": "2026-10-08"},
         cover_path=str(cover), expected_duration=1.024,
     )
     assert audio_packets(aac_file) == audio_packets(destination)
@@ -56,6 +56,7 @@ def test_pyav_copies_aac_bit_for_bit_with_tags_and_cover(aac_file, tmp_path, mon
         assert result.metadata["title"] == "あじがとレディオ#232"
         assert result.metadata["artist"] == "aiko"
         assert result.metadata["album"] == "あじがとレディオ"
+        assert result.metadata["date"] == "2026-10-08"
         assert result.streams.video[0].disposition & av.stream.Disposition.attached_pic
         assert len(list(result.decode(audio=0))) > 0
     assert not list(tmp_path.glob(".output.*"))
@@ -147,6 +148,7 @@ def test_vimeo_workflow_uses_pyav_not_direct_download(tmp_path, monkeypatch):
     resolver = Mock(return_value=resolved)
     save = Mock()
     monkeypatch.setattr(workflow, "resolve_vimeo_audio", resolver)
+    monkeypatch.setattr(workflow, "resolve_team_aiko_publish_date", Mock(return_value="20261008"))
     monkeypatch.setattr(MyFfmpegHelper, "save_aac_as_m4a", save)
     direct_get = Mock(side_effect=AssertionError("direct MP3 downloader must not run"))
     monkeypatch.setattr(workflow.requests, "get", direct_get)
@@ -154,10 +156,48 @@ def test_vimeo_workflow_uses_pyav_not_direct_download(tmp_path, monkeypatch):
         str(html), "sp.aiko.pcan.us", str(tmp_path), logger=Mock(),
     )
     save.assert_called_once()
-    assert Path(save.call_args.kwargs["output_path"]).name == "あじがとレディオ_あじがとレディオ#232.m4a"
+    assert Path(save.call_args.kwargs["output_path"]).name == "あじがとレディオ_20261008_あじがとレディオ#232.m4a"
     assert save.call_args.kwargs["expected_duration"] == 42
-    assert save.call_args.kwargs["metadata"]["artist"] == "aiko"
+    assert save.call_args.kwargs["metadata"] == {
+        "title": "2026-10-08 あじがとレディオ#232", "artist": "aiko",
+        "album": "あじがとレディオ", "date": "2026-10-08",
+    }
     direct_get.assert_not_called()
+
+
+def test_manual_broadcast_date_skips_listing_fetch(tmp_path, monkeypatch):
+    html = '<title>あじがとレディオ#232 | Team aiko</title><iframe src="https://player.vimeo.com/video/123?h=hash"></iframe>'
+    fetch_date = Mock(side_effect=AssertionError("manual date should avoid fetching listing"))
+    monkeypatch.setattr(workflow, "resolve_team_aiko_publish_date", fetch_date)
+    save = Mock()
+    monkeypatch.setattr(workflow, "_download_vimeo_audio", save)
+    assert workflow.download_audio_content(
+        html, "sp.aiko.pcan.us", str(tmp_path), logger=Mock(), broadcast_date="20261008",
+    )
+    assert save.call_args.args[0].broadcast_date == "20261008"
+    fetch_date.assert_not_called()
+
+
+def test_date_lookup_failure_does_not_download_or_guess_date(tmp_path, monkeypatch):
+    from AudioInfoExtractor.team_aiko import TeamAikoDateError
+    html = '<title>あじがとレディオ#232 | Team aiko</title><iframe src="https://player.vimeo.com/video/123?h=hash"></iframe>'
+    monkeypatch.setattr(workflow, "resolve_team_aiko_publish_date", Mock(side_effect=TeamAikoDateError("公開日がありません")))
+    save = Mock()
+    monkeypatch.setattr(workflow, "_download_vimeo_audio", save)
+    assert not workflow.download_audio_content(html, "sp.aiko.pcan.us", str(tmp_path), logger=Mock())
+    save.assert_not_called()
+
+
+def test_cli_accepts_manual_broadcast_date(tmp_path, monkeypatch):
+    html = tmp_path / "page.html"
+    html.write_text("<html></html>")
+    download = Mock(return_value=True)
+    monkeypatch.setattr(workflow, "download_audio_from_html", download)
+    assert workflow.main([
+        "--html", str(html), "--domain", "sp.aiko.pcan.us", "--download_dir", str(tmp_path),
+        "--broadcast-date", "2026-10-08",
+    ]) == 0
+    assert download.call_args.kwargs["broadcast_date"] == "20261008"
 
 
 def test_existing_direct_mp3_workflow_is_preserved(tmp_path, monkeypatch):

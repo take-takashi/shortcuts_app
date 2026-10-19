@@ -15,6 +15,7 @@ class FfmpegMetadata(TypedDict, total=False):
     title: str
     artist: str
     album: str
+    date: str
 
 
 class MyFfmpegHelper:

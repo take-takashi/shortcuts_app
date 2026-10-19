@@ -3,13 +3,18 @@ import json
 import os
 import subprocess
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests
 from av.error import FFmpegError
 
-from AudioInfoExtractor import get_extractor
+from AudioInfoExtractor import TeamAikoInfoExtractor, get_extractor
+from AudioInfoExtractor.team_aiko import (
+    normalize_publication_date,
+    resolve_team_aiko_publish_date,
+)
 from AudioInfoExtractor.vimeo_audio import resolve_vimeo_audio
 from MyFfmpegHelper.my_ffmpeg_helper import FfmpegMetadata, MyFfmpegHelper
 from MyLoggerHelper.my_logger_helper import MyLoggerHelper
@@ -46,6 +51,16 @@ def _download_vimeo_audio(audio_info, download_dir, *, page_url, overwrite, logg
     destination = Path(download_dir) / filename
     if destination.exists() and not overwrite:
         raise FileExistsError(f"保存先が既に存在します（上書きには --overwrite）: {destination}")
+    # ファイル名は既存のYYYYMMDD形式、表示タイトルと日付タグはYYYY-MM-DD形式にする。
+    metadata: FfmpegMetadata = {
+        "title": audio_info.episode_title, "artist": audio_info.artist_name,
+        "album": audio_info.program_name,
+    }
+    if audio_info.broadcast_date:
+        date = datetime.strptime(audio_info.broadcast_date, "%Y%m%d").date().isoformat()
+        metadata["title"] = f"{date} {audio_info.episode_title}"
+        metadata["date"] = date
+        logger.info("公開日: %s / タイトル: %s", date, metadata["title"])
     logger.info("Vimeoの音声専用HLSを取得しています...")
     with requests.Session() as session, tempfile.TemporaryDirectory(prefix="shortcuts-vimeo-") as temporary:
         source = resolve_vimeo_audio(
@@ -65,8 +80,7 @@ def _download_vimeo_audio(audio_info, download_dir, *, page_url, overwrite, logg
                 cover_path = None
         MyFfmpegHelper.save_aac_as_m4a(
             input_path=source.url, output_path=str(destination),
-            metadata={"title": audio_info.episode_title, "artist": audio_info.artist_name,
-                      "album": audio_info.program_name},
+            metadata=metadata,
             referer=source.referer, cover_path=cover_path,
             expected_duration=source.duration, overwrite=overwrite, logger=logger,
         )
@@ -74,7 +88,9 @@ def _download_vimeo_audio(audio_info, download_dir, *, page_url, overwrite, logg
 
 
 # --- HTMLファイル入力は従来の呼び出し方を維持する ---
-def download_audio_from_html(html_path, domain, download_dir, *, logger, page_url="", overwrite=False):
+def download_audio_from_html(
+    html_path, domain, download_dir, *, logger, page_url="", overwrite=False, broadcast_date="",
+):
     """HTMLファイルから音声を保存する。成功時はTrue、失敗時はFalse。"""
     try:
         html_content = Path(html_path).read_text(encoding="utf-8")
@@ -82,11 +98,14 @@ def download_audio_from_html(html_path, domain, download_dir, *, logger, page_ur
         logger.error("HTMLファイルを読み込めませんでした: %s", exc)
         return False
     return download_audio_content(
-        html_content, domain, download_dir, logger=logger, page_url=page_url, overwrite=overwrite,
+        html_content, domain, download_dir, logger=logger, page_url=page_url,
+        overwrite=overwrite, broadcast_date=broadcast_date,
     )
 
 
-def download_audio_content(html_content, domain, download_dir, *, logger, page_url="", overwrite=False):
+def download_audio_content(
+    html_content, domain, download_dir, *, logger, page_url="", overwrite=False, broadcast_date="",
+):
     """HTML文字列を解析し、サイトの配信方式に応じて音声を保存する。"""
     logger.info("ドメイン: %s", domain)
     logger.info("ダウンロード先ディレクトリ: %s", download_dir)
@@ -106,6 +125,14 @@ def download_audio_content(html_content, domain, download_dir, *, logger, page_u
             return False
 
         for audio_info in audio_info_list:
+            if isinstance(extractor, TeamAikoInfoExtractor):
+                # アップロード日や実行日ではなく、サイトの公開日を配信日として使う。
+                if broadcast_date:
+                    audio_info.broadcast_date = normalize_publication_date(broadcast_date)
+                else:
+                    audio_info.broadcast_date = resolve_team_aiko_publish_date(
+                        html_content, audio_info.episode_title, page_url=page_url,
+                    )
             if audio_info.source_type == "vimeo":
                 _download_vimeo_audio(
                     audio_info, download_dir, page_url=page_url, overwrite=overwrite, logger=logger,
@@ -185,6 +212,10 @@ def main(argv=None) -> int:
     parser.add_argument("--page-url", default="", help="元ページのURL（VimeoへのReferer）")
     parser.add_argument("--download_dir", default=".", help="ダウンロード先ディレクトリ")
     parser.add_argument("--overwrite", action="store_true", help="既存のVimeo音声ファイルを上書き")
+    parser.add_argument(
+        "--broadcast-date", type=normalize_publication_date,
+        help="Team aikoの公開日を手動指定（YYYY-MM-DD）。省略時は一覧から取得",
+    )
     args = parser.parse_args(argv)
     if args.html and not args.domain:
         parser.error("--htmlには--domainを指定してください。")
@@ -193,7 +224,10 @@ def main(argv=None) -> int:
         download_directory = MyPathHelper.replace_safe_path(args.download_dir)
         os.makedirs(download_directory, exist_ok=True)
         logger = MyLoggerHelper.setup_logger(__name__, download_directory)
-        options = {"logger": logger, "page_url": args.page_url, "overwrite": args.overwrite}
+        options = {
+            "logger": logger, "page_url": args.page_url, "overwrite": args.overwrite,
+            "broadcast_date": args.broadcast_date or "",
+        }
         if args.safari:
             page = read_safari_page()
             options["page_url"] = page["url"]
