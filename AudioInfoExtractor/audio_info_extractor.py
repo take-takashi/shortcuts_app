@@ -6,6 +6,7 @@ import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
+from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 
@@ -38,6 +39,8 @@ class AudioInfo:
     cover_image_url: str
     audio_src: str
     broadcast_date: str = ""
+    source_type: str = "direct"
+    referer: str = ""
 
 
 class AudioInfoExtractorBase(ABC):
@@ -404,18 +407,72 @@ class JfnPodsInfoExtractor(AudioInfoExtractorBase):
             return None
 
 
+class TeamAikoInfoExtractor(AudioInfoExtractorBase):
+    """ログイン済みのTeam aikoページからVimeo埋め込みと番組情報を取得する。"""
+
+    def get_audio_info(self, html_content: str) -> list[AudioInfo] | None:
+        soup = BeautifulSoup(html_content, "html.parser")
+        referer = "https://sp.aiko.pcan.us/"
+
+        # 空のh1やサイト共通のOGタイトルより、本文の見出しを優先する。
+        heading = soup.select_one(".radio_content h2")
+        if heading is None:
+            heading = next((h for h in soup.select("h2, h1") if h.get_text(strip=True)), None)
+        title = heading.get_text(strip=True) if heading else ""
+        if not title and soup.title:
+            title = re.split(r"\s*[|｜]\s*", soup.title.get_text(strip=True))[0]
+        title = title or "Team aiko"
+        program_match = re.match(r"(.+?)\s*[#＃]\s*\d+", title)
+        program_name = program_match[1].strip() if program_match else "Team aiko"
+
+        # エピソード画像があればサイト共通のOG画像より優先する。
+        cover = soup.select_one(".radio_content img[src*='msg_movie']")
+        if cover:
+            cover_url = str(cover.get("src") or "")
+        else:
+            cover = soup.select_one("meta[property='og:image']")
+            cover_url = str(cover.get("content") or "") if cover else ""
+        cover_url = urljoin(referer, cover_url) if cover_url else ""
+
+        infos = []
+        seen = set()
+        for iframe in soup.select("iframe[src]"):
+            player_url = urljoin(referer, str(iframe["src"]))
+            parsed = urlsplit(player_url)
+            if (parsed.scheme != "https" or parsed.hostname != "player.vimeo.com"
+                    or not re.fullmatch(r"/video/\d+/?", parsed.path)):
+                continue
+            if player_url in seen:
+                continue
+            seen.add(player_url)
+            infos.append(AudioInfo(
+                program_name=program_name,
+                episode_title=title,
+                artist_name="aiko",
+                cover_image_url=cover_url,
+                audio_src=player_url,
+                source_type="vimeo",
+                referer=referer,
+            ))
+        if not infos:
+            self.logger.warning("Vimeo埋め込みがありません。Safariでログインし、対象の回を開いてください。")
+        return infos or None
+
+
 # --- ドメインとExtractorのマッピング ---
 EXTRACTOR_MAP = {
     "audee.jp": AudeeInfoExtractor,
     "ij-matome.bitfan.id": BitfanInfoExtractor,
     "omny.fm": OmnyInfoExtractor,
     "jfn-pods.com": JfnPodsInfoExtractor,
+    "aiko.pcan.us": TeamAikoInfoExtractor,
 }
 
 
 def get_extractor(domain, logger=None):
-    """ドメイン名に一致するExtractorのインスタンスを返す"""
+    """ホスト名またはそのサブドメインに一致するExtractorを返す。"""
+    host = urlsplit(domain if "://" in domain else f"//{domain}").hostname or ""
     for key, extractor_class in EXTRACTOR_MAP.items():
-        if key in domain:
+        if host == key or host.endswith(f".{key}"):
             return extractor_class(logger)
     return None

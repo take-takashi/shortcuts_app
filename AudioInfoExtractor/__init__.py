@@ -4,6 +4,7 @@ from .audio_info_extractor import (
     BitfanInfoExtractor,
     JfnPodsInfoExtractor,
     OmnyInfoExtractor,
+    TeamAikoInfoExtractor,
     get_extractor,
 )
 
@@ -12,6 +13,7 @@ __all__ = [
     "BitfanInfoExtractor",
     "JfnPodsInfoExtractor",
     "OmnyInfoExtractor",
+    "TeamAikoInfoExtractor",
     "AudioInfo",
     "get_extractor",
 ]

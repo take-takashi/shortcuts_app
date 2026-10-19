@@ -2,7 +2,10 @@ import logging
 import math
 import os
 import subprocess
+import tempfile
+from pathlib import Path
 from typing import TypedDict
+from urllib.parse import urlsplit
 import ffmpeg
 
 
@@ -15,6 +18,95 @@ class FfmpegMetadata(TypedDict, total=False):
 
 
 class MyFfmpegHelper:
+    @staticmethod
+    def save_aac_as_m4a(
+        input_path: str,
+        output_path: str,
+        metadata: FfmpegMetadata,
+        *,
+        referer: str = "",
+        cover_path: str | None = None,
+        expected_duration: float | None = None,
+        overwrite: bool = False,
+        logger: logging.Logger | None = None,
+    ) -> Path:
+        """PyAVでAACパケットをコピーし、タグ・カバー付きM4Aを原子的に保存する。"""
+        import av
+        from av.stream import Disposition
+        from PIL import Image
+
+        destination = Path(output_path)
+        if destination.exists() and not overwrite:
+            raise FileExistsError(f"保存先が既に存在します（上書きには --overwrite）: {destination}")
+        remote_input = urlsplit(input_path).scheme in ("https", "http")
+        if not remote_input and Path(input_path).resolve() == destination.resolve():
+            raise ValueError("入力ファイルと保存先は別にしてください。")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(
+            prefix=f".{destination.stem}.", suffix=".m4a", dir=destination.parent,
+        )
+        os.close(fd)
+        try:
+            # リモートHLSからローカルファイルなどの別プロトコルは開かない。
+            options = {}
+            if remote_input:
+                options["protocol_whitelist"] = "http,https,tcp,tls"
+                if "\r" in referer or "\n" in referer:
+                    raise ValueError("Refererが不正です。")
+                if referer:
+                    options["headers"] = f"Referer: {referer}\r\n"
+            with av.open(input_path, options=options, timeout=(30, 60)) as source:
+                if not source.streams.audio:
+                    raise ValueError("音声トラックがありません。")
+                audio = source.streams.audio[0]
+                if audio.codec_context.name != "aac":
+                    raise ValueError("AAC以外の音声です。劣化を避けるため変換せず中止します。")
+                with av.open(temporary, "w", format="mp4", options={"movflags": "+faststart"}) as output:
+                    output.metadata.update({key: str(value) for key, value in metadata.items() if value})
+                    audio_out = output.add_stream_from_template(audio)
+                    if cover_path:
+                        with Image.open(cover_path) as original:
+                            image = original.convert("RGB")
+                        cover = output.add_stream("mjpeg")
+                        cover.width, cover.height = image.size
+                        cover.pix_fmt = "yuvj420p"
+                        cover.disposition = Disposition.attached_pic
+                        frame = av.VideoFrame.from_image(image).reformat(format="yuvj420p")
+                        frame.pts = 0
+                        for packet in cover.encode(frame):
+                            output.mux(packet)
+                        for packet in cover.encode(None):
+                            output.mux(packet)
+
+                    packets = 0
+                    for packet in source.demux(audio):
+                        if packet.dts is None or not packet.size:
+                            continue
+                        packet.stream = audio_out
+                        output.mux(packet)
+                        packets += 1
+                    if not packets:
+                        raise ValueError("音声データを取得できませんでした。")
+
+            # 通信が途中で途切れても、不完全なファイルを完成品として残さない。
+            with av.open(temporary) as result:
+                stream = result.streams.audio[0]
+                duration = (float(stream.duration * stream.time_base)
+                            if stream.duration is not None and stream.time_base is not None else 0)
+                if expected_duration and abs(duration - expected_duration) > max(2, expected_duration * 0.001):
+                    raise ValueError("保存した音声の長さが配信情報と一致しません。再試行してください。")
+            if overwrite:
+                os.replace(temporary, destination)
+            else:
+                # 同時実行時にも既存ファイルを上書きしない。
+                os.link(temporary, destination)
+            if logger:
+                logger.info("AACを再エンコードせずM4Aへ保存しました（%.2f秒）。", duration)
+            return destination
+        finally:
+            if os.path.exists(temporary):
+                os.remove(temporary)
+
     @staticmethod
     def normalize_cover_image_for_mp3(
         cover_path: str,

@@ -6,6 +6,11 @@ uv = "latest"
 _.python.venv = { path = ".venv", create = true }
 SAMPLE = "Hello, sample!"
 
+[tasks.download-safari-audio]
+description = "Safariの現在タブから音声を保存 (Team aikoはPyAVで無劣化M4A)"
+raw_args = true
+run = "uv run --locked python download_audio_from_html.py --safari"
+
 [tasks.gemini-music]
 description = "GeminiのMP4をPyAVで音楽ファイルに変換 (ffmpeg CLI不要)"
 raw_args = true
