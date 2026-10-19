@@ -2,6 +2,41 @@
 
 Mac, iOSのショートカット.appで使うスクリプトなどをまとめる
 
+## RadikoとPodcastの日次ダウンロード
+
+`download_radiko_and_upload_notion.ts` はRadikoとPodcastの音声を取得し、同じNotionデータベースへ登録します。Macのショートカットで使っているスクリプトのパスや引数は変更不要です。Podcast用の依存関係だけ初回にインストールします。
+
+```bash
+cd tools/podcast
+mise run install
+```
+
+従来の呼び出しで、Radikoに加えて次の3番組も取得します。
+
+- 佐藤栞里 さとしおあちぇとぺぺ -餃子オンザライス-
+- お互いさまっす
+- 春とヒコーキのグピ☆グパ☆グポ
+
+```bash
+# プロジェクトルートから実行。日次オートメーションの呼び出しは従来どおり
+./download_radiko_and_upload_notion.ts --keywords "伊集院光|サンドウィッチマン"
+
+# 指定日を再実行
+./download_radiko_and_upload_notion.ts --keywords "伊集院光" --date 20261018
+
+# 初回だけ、Podcast各番組の公開済み最新1回をNotionへ登録
+./download_radiko_and_upload_notion.ts --podcast-only --latest
+
+# 従来のRadikoだけを実行する場合
+./download_radiko_and_upload_notion.ts --keywords "伊集院光" --radiko-only
+```
+
+日付省略時は昨日分です。`--date today` または `--date YYYYMMDD` も指定できます。日付は実行開始時に日本時間で一度だけ確定し、両方へ渡します。Radikoは番組表上の放送日、PodcastはRSSの公開日を使うため、深夜番組などで日付の区切りが異なる場合があります。`--save-directory` と `--overwrite` は両方に適用します。
+
+Podcastは元のMP3を保存し、音声を再エンコードしません。埋め込み済みのタイトル・番組名・カバー画像を維持し、不足時のみRSSから補完します。Notionページのカバーは設定しません。処理済み履歴は保存しないため、別DBへ移動後に同じ日を再実行すると再登録される場合があります。
+
+片方の取得が失敗しても他方は続行し、取得できた音声をNotionへ登録します。一部でも失敗すると終了コードは1になります。番組の追加・変更とログの場所は [Podcastの説明](tools/podcast/README.md) を参照してください。
+
 ## メッセージからの操作
 
 `message_automation.py` は、以下の固定コマンドだけを受け付けます。メッセージをシェルのコマンドとして実行することはありません。

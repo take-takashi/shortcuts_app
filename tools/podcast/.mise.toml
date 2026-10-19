@@ -1,0 +1,25 @@
+min_version = "2025.2.0"
+
+[tools]
+bun = "1.4.2"
+
+[tasks.install]
+description = "Podcast用の依存関係をインストール"
+run = "bun install --frozen-lockfile"
+sources = ["package.json", "bun.lock"]
+outputs = ["node_modules"]
+
+[tasks.typecheck]
+description = "TypeScriptの型チェック"
+depends = ["install"]
+run = "bun run typecheck"
+
+[tasks.test]
+description = "Podcastと日次処理のテスト（外部通信なし）"
+depends = ["install"]
+run = "bun run test"
+
+[tasks.download]
+description = "公開日を指定してPodcastをダウンロード"
+depends = ["typecheck"]
+run = "bun run download \"$@\""
