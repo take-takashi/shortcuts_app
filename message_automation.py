@@ -3,6 +3,7 @@
 import fcntl
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -18,6 +19,12 @@ DEFAULT_LOG_DIR = Path.home() / "Library/Logs/shortcuts_app"
 # ログの出力先を変えても、同じユーザーのNotion処理は重複起動させない。
 STATE_DIR = Path.home() / "Library/Application Support/shortcuts_app"
 NOTION_WORKER_ARG = "--notion-worker"
+TAILSCALE_PATHS = (
+    "/opt/homebrew/bin/tailscale",
+    "/usr/local/bin/tailscale",
+    "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+    str(Path.home() / "Applications/Tailscale.app/Contents/MacOS/Tailscale"),
+)
 
 logger = logging.getLogger(__name__)
 _log_handler: logging.Handler | None = None
@@ -159,6 +166,64 @@ def run_notion_worker(lock_fd: int) -> int:
         return completed.returncode if completed.returncode >= 0 else 1
 
 
+def find_tailscale() -> str:
+    """ShortcutsのPATHにない場合も、Homebrew版・アプリ版を探す。"""
+    for candidate in ("tailscale", *TAILSCALE_PATHS):
+        executable = shutil.which(candidate)
+        if executable:
+            return executable
+    raise FileNotFoundError(
+        "Tailscale CLIが見つかりません。Tailscaleをインストールしてください。"
+    )
+
+
+def run_tailscale(enabled: bool) -> int:
+    """既存の設定を維持して、接続・切断を行う。"""
+    action = "on" if enabled else "off"
+    arguments = ["up", "--timeout=20s"] if enabled else ["down"]
+    try:
+        completed = subprocess.run(
+            [find_tailscale(), *arguments],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=25,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise TimeoutError(
+            "Tailscaleの操作がタイムアウトしました。"
+            "ターミナルで tailscale up を実行し、接続・ログインを確認してください。"
+        ) from error
+
+    # CLIの警告やログイン案内も残す。標準出力は成功時の固定メッセージだけ。
+    for output in (completed.stdout, completed.stderr):
+        if output.strip():
+            logger.info("Tailscale CLI: %s", output.strip())
+            print(output.rstrip(), file=sys.stderr)
+
+    if completed.returncode != 0:
+        message = (
+            f"Tailscaleの切り替えに失敗しました。command=tailscale:{action} "
+            f"returncode={completed.returncode}"
+        )
+        logger.error(message)
+        print(message, file=sys.stderr)
+        return completed.returncode if completed.returncode >= 0 else 1
+
+    logger.info("Tailscaleの切り替えが完了しました。command=tailscale:%s", action)
+    print("TAILSCALE_ON" if enabled else "TAILSCALE_OFF")
+    return 0
+
+
+def run_tailscale_on() -> int:
+    return run_tailscale(True)
+
+
+def run_tailscale_off() -> int:
+    return run_tailscale(False)
+
+
 def run_health() -> int:
     print("OK")
     return 0
@@ -168,6 +233,8 @@ def run_health() -> int:
 ACTIONS: dict[str, Callable[[], int]] = {
     "auto:notion": run_notion,
     "health": run_health,
+    "tailscale:on": run_tailscale_on,
+    "tailscale:off": run_tailscale_off,
 }
 
 

@@ -53,6 +53,11 @@ def event_log(log_dir: Path) -> str:
         "MAC|auto:notion|extra",
         "OTHER|auto:notion",
         "MAC|--notion-worker",
+        "tailscale:off",
+        "MAC|tailscale:up",
+        "MAC|tailscale:on --reset",
+        "MAC|tailscale:on; echo injected",
+        "MAC|tailscale:off|extra",
     ],
 )
 def test_parse_message_rejects_invalid_or_unregistered_commands(message):
@@ -64,8 +69,9 @@ def test_parse_message_accepts_registered_command_with_line_ending():
     assert automation.parse_message("MAC|auto:notion\n") == "auto:notion"
 
 
-def test_parse_message_accepts_health_command():
-    assert automation.parse_message("MAC|health") == "health"
+@pytest.mark.parametrize("command", ["health", "tailscale:on", "tailscale:off"])
+def test_parse_message_accepts_registered_commands(command):
+    assert automation.parse_message(f"MAC|{command}") == command
 
 
 def test_resolve_command_uses_valid_argument_when_stdin_is_blank():
@@ -160,6 +166,155 @@ def test_health_returns_ok_without_starting_a_worker(via_stdin, capsys):
         assert invoke("MAC|health", via_stdin=via_stdin) == 0
     assert capsys.readouterr().out == "OK\n"
     popen.assert_not_called()
+
+
+def test_find_tailscale_prefers_path():
+    with patch.object(
+        automation.shutil, "which", return_value="/custom/bin/tailscale"
+    ) as which:
+        assert automation.find_tailscale() == "/custom/bin/tailscale"
+    which.assert_called_once_with("tailscale")
+
+
+@pytest.mark.parametrize("candidate", automation.TAILSCALE_PATHS)
+def test_find_tailscale_uses_known_paths_when_missing_from_path(candidate):
+    with patch.object(
+        automation.shutil,
+        "which",
+        side_effect=lambda name: candidate if name == candidate else None,
+    ):
+        assert automation.find_tailscale() == candidate
+
+
+def test_find_tailscale_requires_executable_file(tmp_path, monkeypatch):
+    executable = tmp_path / "tailscale"
+    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setattr(automation, "TAILSCALE_PATHS", (str(executable),))
+    with pytest.raises(FileNotFoundError, match="Tailscale CLIが見つかりません"):
+        automation.find_tailscale()
+    executable.chmod(0o755)
+    assert automation.find_tailscale() == str(executable)
+
+
+@pytest.mark.parametrize("via_stdin", [True, False])
+@pytest.mark.parametrize(
+    ("action", "arguments", "output"),
+    [
+        ("on", ["up", "--timeout=20s"], "TAILSCALE_ON\n"),
+        ("off", ["down"], "TAILSCALE_OFF\n"),
+    ],
+)
+def test_tailscale_runs_only_fixed_cli_command(
+    action, arguments, output, via_stdin, tmp_path, capsys
+):
+    with (
+        patch.object(automation, "find_tailscale", return_value="/test/tailscale"),
+        patch.object(
+            automation.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+        ) as run,
+        patch.object(automation.subprocess, "Popen") as popen,
+    ):
+        assert invoke(f"MAC|tailscale:{action}", via_stdin=via_stdin) == 0
+    run.assert_called_once_with(
+        ["/test/tailscale", *arguments],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=25,
+        check=False,
+    )
+    popen.assert_not_called()
+    captured = capsys.readouterr()
+    assert captured.out == output
+    assert captured.err == ""
+    text = event_log(tmp_path / "logs")
+    assert "Tailscaleの切り替えが完了しました" in text
+    assert f"command=tailscale:{action} returncode=0" in text
+
+
+def test_tailscale_success_keeps_cli_warnings_in_stderr_and_log(tmp_path, capsys):
+    with (
+        patch.object(automation, "find_tailscale", return_value="/test/tailscale"),
+        patch.object(
+            automation.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess(
+                [], 0, stdout="", stderr="Warning: version mismatch\n"
+            ),
+        ),
+    ):
+        assert invoke("MAC|tailscale:on") == 0
+    captured = capsys.readouterr()
+    assert captured.out == "TAILSCALE_ON\n"
+    assert "version mismatch" in captured.err
+    assert "version mismatch" in event_log(tmp_path / "logs")
+
+
+@pytest.mark.parametrize("action", ["on", "off"])
+@pytest.mark.parametrize("returncode", [1, 7, -15])
+def test_tailscale_failure_is_logged_without_success_output(
+    action, returncode, tmp_path, capsys
+):
+    with (
+        patch.object(automation, "find_tailscale", return_value="/test/tailscale"),
+        patch.object(
+            automation.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess(
+                [], returncode, stdout="Login required\n", stderr="CLI failed\n"
+            ),
+        ),
+    ):
+        expected_status = returncode if returncode >= 0 else 1
+        assert invoke(f"MAC|tailscale:{action}") == expected_status
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Login required" in captured.err
+    assert "CLI failed" in captured.err
+    assert "Tailscaleの切り替えに失敗しました" in captured.err
+    text = event_log(tmp_path / "logs")
+    assert "Login required" in text
+    assert "CLI failed" in text
+    assert f"command=tailscale:{action} returncode={returncode}" in text
+    assert "Tailscaleの切り替えが完了しました" not in text
+
+
+def test_tailscale_missing_cli_does_not_run(tmp_path, capsys):
+    with (
+        patch.object(automation.shutil, "which", return_value=None),
+        patch.object(automation.subprocess, "run") as run,
+    ):
+        assert invoke("MAC|tailscale:on") == 1
+    run.assert_not_called()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Tailscale CLIが見つかりません" in captured.err
+    assert "Tailscale CLIが見つかりません" in event_log(tmp_path / "logs")
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (OSError("exec failed"), "exec failed"),
+        (
+            subprocess.TimeoutExpired(["/test/tailscale", "up"], 25),
+            "Tailscaleの操作がタイムアウトしました",
+        ),
+    ],
+)
+def test_tailscale_execution_errors_are_reported(error, message, tmp_path, capsys):
+    with (
+        patch.object(automation, "find_tailscale", return_value="/test/tailscale"),
+        patch.object(automation.subprocess, "run", side_effect=error),
+    ):
+        assert invoke("MAC|tailscale:on") == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert message in captured.err
+    assert message in event_log(tmp_path / "logs")
 
 
 def test_main_does_not_run_unregistered_command(tmp_path, capsys):
