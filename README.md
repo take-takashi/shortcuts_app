@@ -2,6 +2,20 @@
 
 Mac, iOSのショートカット.appで使うスクリプトなどをまとめる
 
+## CDを取り込んでNotionへ保存
+
+`mise run import-cd`でdiskflowを起動し、完成AACを曲ごとにNotionへ登録します。アルバム名のタグページには本文先頭にカバー画像、その直後に原本ZIPを配置し、アイコンにも同じ画像を設定します。ZIPからはCDなしで未加工WAVの取り出しやAACの再生成ができます。
+
+```bash
+# 初回だけSpotlight用アプリを作成。その後は「CDをNotionへ」で検索して起動
+mise run install-cd-shortcut
+
+# Terminalから直接起動する場合
+mise run import-cd
+```
+
+認証設定、画像の指定、失敗後の再開、ZIPからの復元は[CD取り込みの説明](docs/cd_import.md)を参照してください。`--prepare-only`ならNotionへ接続せず、AACとZIPの作成まで確認できます。
+
 ## RadikoとPodcastの日次ダウンロード
 
 `download_radiko_and_upload_notion.ts` はRadikoとPodcastの音声を取得し、同じNotionデータベースへ登録します。Macのショートカットで使っているスクリプトのパスや引数は変更不要です。Podcast用の依存関係だけ初回にインストールします。

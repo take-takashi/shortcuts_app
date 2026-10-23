@@ -1,18 +1,15 @@
-import concurrent.futures
-import json
 import logging
 import os
 import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import requests
 from notion_client import Client
 
 from pyav_split_by_5gib import split_video
-
 
 NOTION_MAX_VIDEO_SIZE = 5 * 1024**3
 NOTION_VIDEO_SPLIT_SIZE = NOTION_MAX_VIDEO_SIZE - 100 * 1024**2
@@ -66,7 +63,12 @@ class MyNotionHelper:
             raise Exception(f"Notionデータベースの取得に失敗しました: {e}")
 
     def get_page_id_by_title(
-        self, database_id: str, title: str, property_name: str = "Name"
+        self,
+        database_id: str,
+        title: str,
+        property_name: str = "Name",
+        *,
+        strict: bool = False,
     ) -> str | None:
         """
         指定されたデータベース内で、タイトルに一致するページのIDを取得します。
@@ -82,24 +84,28 @@ class MyNotionHelper:
                 },
             )
             results = response.get("results")  # type: ignore[reportAttributeAccessIssue]
+            if strict and results and len(results) > 1:
+                raise ValueError(f"同じ名前のタグが複数あります: {title}")
             if results and len(results) > 0:
                 return results[0]["id"]
             return None
         except Exception as e:
+            if strict:
+                raise
             self.logger.error(
                 f"Failed to get page ID by title '{title}' in database '{database_id}': {e}"
             )
             return None
 
     def get_or_create_tag_page(
-        self, database_id: str, title: str, category: str
+        self, database_id: str, title: str, category: str, *, strict: bool = False
     ) -> str | None:
         """
         指定されたデータベースでタイトルに一致するページを取得、なければ作成します。
         作成する場合、指定されたカテゴリも設定します。
         """
         # まずページを検索
-        page_id = self.get_page_id_by_title(database_id, title)
+        page_id = self.get_page_id_by_title(database_id, title, strict=strict)
         if page_id:
             return page_id
 
@@ -120,9 +126,13 @@ class MyNotionHelper:
                 self.logger.info(f"Created page with ID: {new_page_id}")
                 return new_page_id
             else:
+                if strict:
+                    raise RuntimeError(f"タグページIDを取得できません: {title}")
                 self.logger.error(f"Failed to create page for title '{title}'.")
                 return None
         except Exception as e:
+            if strict:
+                raise
             self.logger.error(f"Failed to get or create page for title '{title}': {e}")
             return None
 
@@ -283,21 +293,8 @@ class MyNotionHelper:
         except Exception as e:
             raise Exception(f"ページID「{page_id}」へのコメント投稿に失敗しました: {e}")
 
-    # 指定したNotionページにファイルをアップロードする関数
-    def upload_file(self, page_id: str, file_path: str):
-        """
-        指定したNotionページにファイルをアップロードします。
-
-        引数:
-            page_id (str): ファイルをアップロードするNotionページのID。
-            file_path (str): アップロードするファイルのパス。
-
-        例外:
-            Exception: ファイルアップロードに失敗した場合に発生します。
-
-        戻り値:
-            なし
-        """
+    def upload_file_data(self, file_path: str) -> str:
+        """実体だけを送信し、添付前のfile_upload IDを返す。"""
 
         try:
             # 20MB以下ならsingle_part、20MB超ならmulti_partとする（Notion APIの仕様）
@@ -314,6 +311,8 @@ class MyNotionHelper:
             if mode == "single_part":
                 payload = {
                     "filename": file_name,
+                    "content_type": mime_type_info.mime_type,
+                    "mode": "single_part",
                 }
             elif mode == "multi_part":
                 # 10MBごとの分割数を計算
@@ -334,14 +333,11 @@ class MyNotionHelper:
                     "content-type": "application/json",
                     "Notion-Version": self.version,
                 },
+                timeout=(10, 180),
             )
 
-            if file_create_response.status_code != 200:
-                raise Exception(
-                    f"File creation failed with status code {file_create_response.status_code}: {file_create_response.text}"
-                )
-
-            file_upload_id = json.loads(file_create_response.text)["id"]
+            file_create_response.raise_for_status()
+            file_upload_id = file_create_response.json()["id"]
             self.logger.info(f"File upload ID: {file_upload_id}")
 
             # Step 2: Upload file contents
@@ -361,197 +357,204 @@ class MyNotionHelper:
                         url=upload_url,
                         headers=upload_headers,
                         files=files,
+                        timeout=(10, 180),
                     )
-
-                    if upload_response.status_code != 200:
-                        raise Exception(
-                            f"File upload failed with status code {upload_response.status_code}: {upload_response.text}"
-                        )
+                    upload_response.raise_for_status()
 
             elif mode == "multi_part":
-                # チャンクごとにアップロードする一時関数を定義
-                def upload_chunk(part_number: int, chunk: bytes):
-                    # 各チャンクのリトライ回数を3回とする
-                    max_retries = 3
-                    for attempt in range(max_retries):
-                        files = {
-                            "file": (file_name, chunk, mime_type_info.mime_type),
-                            "part_number": (None, str(part_number)),
-                        }
-                        self.logger.info(
-                            f"Uploading part {part_number} of {number_of_parts}... (Attempt {attempt + 1})"
-                        )
-
-                        response = requests.post(
-                            url=upload_url,
-                            headers=upload_headers,
-                            files=files,
-                        )
-                        # 200 OKの時は問題なし
-                        if response.status_code == 200:
-                            return
-                        # 200 OK以外の場合はリトライ回数が許すなら1秒後に再実行
-                        else:
-                            self.logger.warning(
-                                f"Attempt {attempt + 1} failed for part {part_number}: {response.status_code} - {response.text}"
+                # ZIP全体をメモリに載せず、10MiBずつ送る。各パートの再送は冪等。
+                with open(file_path, "rb") as source:
+                    for part_number in range(1, number_of_parts + 1):
+                        chunk = source.read(self.CHUNK_SIZE)
+                        if not chunk:
+                            raise ValueError("送信中にファイルサイズが変わりました。")
+                        for attempt in range(3):
+                            self.logger.info(
+                                "送信中: %s (%d/%d)",
+                                file_name,
+                                part_number,
+                                number_of_parts,
                             )
-                            if attempt < max_retries - 1:
-                                time.sleep(1)
-
-                    raise Exception(
-                        f"Failed to upload part {part_number} after {max_retries} attempts"
-                    )
-
-                # 実際にファイルを分割で読み込んで順次並列アップロードする
-                with open(file_path, "rb") as f:
-                    chunks = [
-                        (i + 1, f.read(self.CHUNK_SIZE)) for i in range(number_of_parts)
-                    ]
-
-                # max_workers分割（デフォルト5）で実行する
-                with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                    futures = [
-                        executor.submit(upload_chunk, part_number, chunk)
-                        for part_number, chunk in chunks
-                    ]
-                    concurrent.futures.wait(futures)
-
-                # 全チャンクのアップロードが成功した場合は、完了通知を送信
-                complete_url = (
-                    f"https://api.notion.com/v1/file_uploads/{file_upload_id}/complete"
-                )
-                complete_headers = {
-                    "accept": "application/json",
-                    "Authorization": f"Bearer {self.token}",
-                    "Notion-Version": self.version,
-                }
-
-                # 完了通知を送信
-                complete_response = requests.post(
-                    complete_url,
-                    headers=complete_headers,
-                )
-
-                if complete_response.status_code != 200:
-                    raise Exception(
-                        f"Failed to complete file upload with status code {complete_response.status_code}: {complete_response.text}"
-                    )
-
-            # Step 3: Attach the file to a page or block
-
-            add_url = f"https://api.notion.com/v1/blocks/{page_id}/children"
-
-            add_headers = {
-                "Authorization": f"Bearer {self.token}",
-                "Content-Type": "application/json",
-                "Notion-Version": self.version,
-            }
-
-            # MIMEタイプによってdataが変わる
-            add_data = {
-                "children": [
-                    {
-                        "type": mime_type_info.file_type,
-                        mime_type_info.file_type: {
-                            "caption": [
-                                {
-                                    "type": "text",
-                                    "text": {"content": file_name, "link": None},
-                                    "annotations": {
-                                        "bold": False,
-                                        "italic": False,
-                                        "strikethrough": False,
-                                        "underline": False,
-                                        "code": False,
-                                        "color": "default",
+                            try:
+                                response = requests.post(
+                                    url=upload_url,
+                                    headers=upload_headers,
+                                    files={
+                                        "file": (
+                                            file_name,
+                                            chunk,
+                                            mime_type_info.mime_type,
+                                        ),
+                                        "part_number": (None, str(part_number)),
                                     },
-                                    "plain_text": file_name,
-                                    "href": "null",
-                                }
-                            ],
-                            "type": "file_upload",
-                            "file_upload": {"id": file_upload_id},
-                        },
-                    }
-                ]
-            }
-
-            # ページの末尾にファイルを添付する
-            add_response = requests.patch(
-                add_url,
-                headers=add_headers,
-                data=json.dumps(add_data),
-            )
-
-            if add_response.status_code != 200:
-                raise Exception(
-                    f"Failed to attach file to page with status code {add_response.status_code}: {add_response.text}"
+                                    timeout=(10, 180),
+                                )
+                                response.raise_for_status()
+                                break
+                            except requests.RequestException as exc:
+                                status = (
+                                    exc.response.status_code
+                                    if exc.response is not None
+                                    else None
+                                )
+                                if attempt == 2 or (
+                                    status is not None
+                                    and status < 500
+                                    and status != 429
+                                ):
+                                    raise
+                                delay = 2**attempt
+                                if exc.response is not None and status == 429:
+                                    try:
+                                        delay = min(
+                                            120,
+                                            max(
+                                                1,
+                                                float(
+                                                    exc.response.headers.get(
+                                                        "Retry-After", delay
+                                                    )
+                                                ),
+                                            ),
+                                        )
+                                    except (ValueError, TypeError):
+                                        pass
+                                time.sleep(delay)
+                        del chunk
+                # 失敗したパートがある場合はここに到達しない。
+                complete_response = requests.post(
+                    f"https://api.notion.com/v1/file_uploads/{file_upload_id}/complete",
+                    headers=upload_headers,
+                    timeout=(10, 180),
                 )
+                complete_response.raise_for_status()
 
-            # ページのプロパティにファイルプロパティが存在すれば、アップロードしたファイルをそこにも添付する
-            try:
-                # ページの詳細情報を取得してファイルプロパティ名を検索
-                page_info: dict = self.notion.pages.retrieve(page_id=page_id)  # type: ignore
-                file_property_name = None
-                for prop_name, prop in page_info.get("properties", {}).items():
-                    # Notion APIでは Files & Media プロパティの type は "files"
-                    if isinstance(prop, dict) and prop.get("type") == "files":
-                        file_property_name = prop_name
-                        break
-
-                # ファイルプロパティがあれば、そのプロパティにもファイルを添付する
-                if file_property_name:
-                    # 既存のファイルリストを取得（存在しない場合は空のリスト）
-                    existing_files = []
-                    prop = page_info["properties"].get(file_property_name, {})
-                    if isinstance(prop, dict) and "files" in prop:
-                        existing_files = prop["files"]
-
-                    # 今回アップロードしたファイルのエントリを作成
-                    new_file_entry = {
-                        "type": "file_upload",
-                        "name": file_name,
-                        "file_upload": {"id": file_upload_id},
-                    }
-
-                    # 既存のファイルに新しいファイルを追加
-                    updated_file_list = existing_files + [new_file_entry]
-
-                    # プロパティを更新
-                    update_properties = {
-                        file_property_name: {"files": updated_file_list}
-                    }
-
-                    # Notion クライアントを使ってプロパティを更新
-                    self.notion.pages.update(
-                        page_id=page_id, properties=update_properties
-                    )
-
-            except Exception as e:
-                # プロパティへの添付に失敗した場合はログに記録しますが、ページへの添付は成功しているため処理を続行
-                self.logger.warning(f"Failed to attach file to property: {e}")
-                raise
-
-        except Exception as e:
-            self.logger.error(f"Notionへのアップロードに失敗しました: {e}")
+            return file_upload_id
+        except Exception:
+            self.logger.error("Notionへのファイル送信に失敗しました。")
             raise
 
-    def add_music_info_to_db(
-        self, metadata: dict, file_path: str, database_id: str, tags_database_id: str
-    ):
-        """
-        取得したメタデータをNotionデータベースに追加し、関連ファイルをアップロードします。
-        """
-        self.logger.info(__name__)
+    def upload_file(self, page_id: str, file_path: str):
+        """従来の呼び出し用。送信・本文添付・ファイルプロパティ更新を行う。"""
+        upload_id = self.upload_file_data(file_path)
+        name = os.path.basename(file_path)
+        kind = self.get_mime_type_from_extension(file_path).file_type
+        self.attach_uploaded_file(page_id, upload_id, name, kind)
+        self.update_file_property(page_id, [self.upload_reference(name, upload_id)])
 
-        # アルバムのリレーションIDを取得（なければ作成）
-        album_id = self.get_or_create_tag_page(
-            tags_database_id, metadata.get("album", "No Album"), "音楽"
+    @staticmethod
+    def upload_reference(name: str, upload_id: str) -> dict:
+        return {"name": name, "type": "file_upload", "file_upload": {"id": upload_id}}
+
+    def attach_uploaded_file(
+        self,
+        page_id: str,
+        upload_id: str,
+        name: str,
+        kind: str,
+        *,
+        position: dict | None = None,
+    ) -> str:
+        """本文へ1ブロックを追加し、再開用にブロックIDを返す。"""
+        media: dict[str, Any] = {
+            "type": "file_upload",
+            "file_upload": {"id": upload_id},
+            "caption": [{"type": "text", "text": {"content": name}}],
+        }
+        if kind == "file":
+            media["name"] = name
+        payload: dict[str, Any] = {
+            "children": [{"object": "block", "type": kind, kind: media}]
+        }
+        if position is not None:
+            payload["position"] = position
+        response = requests.patch(
+            f"https://api.notion.com/v1/blocks/{page_id}/children",
+            # 位置指定だけ新APIを使用し、既存database queryの互換性を保つ。
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Notion-Version": "2026-03-11"
+                if position is not None
+                else self.version,
+            },
+            json=payload,
+            timeout=(10, 180),
         )
-        # アルバムアーティストのリレーションIDを取得（なければ作成）
-        album_artist_id = self.get_or_create_tag_page(
-            tags_database_id, metadata.get("album_artist", "No Album Artist"), "音楽"
+        response.raise_for_status()
+        return response.json()["results"][0]["id"]
+
+    def set_page_icon(self, page_id: str, upload_id: str) -> None:
+        """期限付きURLではなく、アップロード実体をアイコンに使う。"""
+        response = requests.patch(
+            f"https://api.notion.com/v1/pages/{page_id}",
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Notion-Version": "2026-03-11",
+            },
+            json={"icon": {"type": "file_upload", "file_upload": {"id": upload_id}}},
+            timeout=(10, 180),
         )
+        response.raise_for_status()
+
+    def update_file_property(
+        self, page_id: str, files: list[dict], *, prepend: bool = False
+    ) -> None:
+        """最初のfilesプロパティを更新し、既存添付と新規添付の順序を保つ。"""
+        page = cast(dict[str, Any], self.notion.pages.retrieve(page_id=page_id))
+        for name, prop in page.get("properties", {}).items():
+            if prop.get("type") != "files":
+                continue
+            incoming_names = {entry["name"] for entry in files}
+            existing = []
+            for entry in prop.get("files", []):
+                if entry["name"] in incoming_names:
+                    continue
+                kind = entry["type"]
+                key = "id" if kind == "file_upload" else "url"
+                existing.append(
+                    {"name": entry["name"], "type": kind, kind: {key: entry[kind][key]}}
+                )
+            ordered = files + existing if prepend else existing + files
+            self.notion.pages.update(
+                page_id=page_id, properties={name: {"files": ordered}}
+            )
+            return
+
+    def file_upload_is_ready(self, upload_id: str) -> bool:
+        """未添付アップロードの期限切れを、再開時に確認する。"""
+        response = requests.get(
+            f"https://api.notion.com/v1/file_uploads/{upload_id}",
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Notion-Version": self.version,
+            },
+            timeout=(10, 180),
+        )
+        if response.status_code == 404:
+            return False
+        response.raise_for_status()
+        return response.json().get("status") == "uploaded"
+
+    def get_max_upload_size(self) -> int:
+        """プラン上限と分割アップロードの閾値を混同しない。"""
+        user = cast(dict[str, Any], self.notion.users.me())
+        limit = (
+            user.get("bot", {})
+            .get("workspace_limits", {})
+            .get("max_file_upload_size_in_bytes")
+        )
+        if type(limit) is not int or limit <= 0:
+            raise ValueError("Notionワークスペースのファイル上限を取得できません。")
+        return limit
+
+    def create_music_page(
+        self,
+        metadata: dict,
+        database_id: str,
+        album_id: str | None,
+        album_artist_id: str | None,
+    ) -> str:
+        """ページ作成と音声送信の間で再開情報を保存できるよう共通化する。"""
 
         # Notionのページプロパティを作成（ファイルプロパティはupload_file関数で処理）
         properties = {
@@ -578,31 +581,29 @@ class MyNotionHelper:
         else:
             properties["アルバムアーティスト"] = {"relation": []}  # type: ignore
 
-        try:
-            # Step 1: まずファイル以外のメタデータでページを作成する
-            self.logger.info(f"Creating Notion page with metadata for {file_path}...")
-            new_page_response: dict = self.notion.pages.create(
+        response = cast(
+            dict[str, Any],
+            self.notion.pages.create(
                 parent={"database_id": database_id}, properties=properties
-            )  # type: ignore
-            page_id = new_page_response["id"]
-            self.logger.info(f"Page created with ID: {page_id}")
+            ),
+        )
+        page_id = response.get("id")
+        if not isinstance(page_id, str) or not page_id:
+            raise RuntimeError("曲ページIDを取得できません。")
+        return page_id
 
-            # Step 2: 作成したページにファイルをアップロードする
-            # upload_file関数が、ページのブロックとファイルプロパティの両方に添付してくれる
-            self.logger.info(
-                f"Uploading file '{os.path.basename(file_path)}' to page {page_id}..."
-            )
-            self.upload_file(page_id=page_id, file_path=file_path)
-
-            self.logger.info(
-                "Successfully added music info and uploaded file to Notion."
-            )
-
-        except Exception as e:
-            self.logger.error(f"Failed to add music info to Notion: {e}")
-            raise e
-
-        # End of upload_file method
+    def add_music_info_to_db(
+        self, metadata: dict, file_path: str, database_id: str, tags_database_id: str
+    ):
+        """従来の単曲アップロードも同じページ作成・送信処理を使う。"""
+        album_id = self.get_or_create_tag_page(
+            tags_database_id, metadata.get("album", "No Album"), "音楽"
+        )
+        artist_id = self.get_or_create_tag_page(
+            tags_database_id, metadata.get("album_artist", "No Album Artist"), "音楽"
+        )
+        page_id = self.create_music_page(metadata, database_id, album_id, artist_id)
+        self.upload_file(page_id=page_id, file_path=file_path)
 
     # 指定したNotionページに動画をアップロードする関数（5GiB超え分割機能有）
     def upload_video(self, page_id: str, file_path: str):
@@ -678,6 +679,7 @@ class MyNotionHelper:
             ".webp": MimeTypeInfo(mime_type="image/webp", file_type="image"),
             ".mp3": MimeTypeInfo(mime_type="audio/mpeg", file_type="audio"),
             ".m4a": MimeTypeInfo(mime_type="audio/mp4", file_type="audio"),
+            ".zip": MimeTypeInfo(mime_type="application/zip", file_type="file"),
         }
         return mime_types.get(
             extension,

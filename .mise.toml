@@ -6,6 +6,16 @@ uv = "latest"
 _.python.venv = { path = ".venv", create = true }
 SAMPLE = "Hello, sample!"
 
+[tasks.import-cd]
+description = "CDを取り込み、曲とカバー・原本ZIPをNotionへ登録"
+raw_args = true
+run = "uv run --locked python import_cd_to_notion.py"
+
+[tasks.install-cd-shortcut]
+description = "Spotlight用の「CDをNotionへ」アプリを作成"
+raw_args = true
+run = "uv run --locked python install_cd_import_app.py"
+
 [tasks.download-safari-audio]
 description = "Safariの現在タブから音声を保存 (Team aikoはPyAVで無劣化M4A)"
 raw_args = true
