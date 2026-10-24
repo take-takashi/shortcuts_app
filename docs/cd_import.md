@@ -18,6 +18,33 @@ NOTION_DATABASE_TAGS_ID=your_tags_database_id_here
 
 インテグレーションに両データベースへのアクセスと、コンテンツの読み取り・挿入・更新権限を付けてください。曲DBのプロパティは既存どおり「タイトル」「No」「トラックアーティスト」「アルバム」「アルバムアーティスト」、タグDBは「Name」「Category」を使います。タグ名が同じページが複数ある場合は、誤ったページに添付しないよう停止します。アーティストとアルバムの区別方法は既存のタグ設計を引き継ぎます。
 
+## ショートカット.appからの起動
+
+次のコマンドで、ショートカット.appに追加できる署名済みファイルを生成します。生成しただけでは追加も取り込みも始まりません。既存ファイルは上書きしません。
+
+```bash
+cd ~/github/shortcuts_app
+mise run export-cd-shortcut
+```
+
+`~/Downloads/CDをNotionへ（ショートカット）.shortcut`を開き、内容を確認して「ショートカットを追加」を押してください。追加後はショートカット.appやSpotlightから起動できます。従来の.appと区別できるよう、名前に「ショートカット」を付けています。
+
+中身はコメント、キャンセル可能な確認、シェルスクリプトの3アクションです。実行すると新しいCDの取り込みを確認し、続行した場合だけTerminalで既存の`.command`を開きます。まず試すだけなら確認をキャンセルしてください。取り込み済みのCDで再実行すると、別の出力として重複登録される場合があります。
+
+初回にスクリプト実行の許可を求められた場合は、ショートカット.appの「設定」→「詳細」で「スクリプトの実行を許可」を確認してください。スクリプトは次の起動処理だけで、Pythonの音声処理やNotionトークンはファイルに埋め込みません。
+
+```zsh
+/usr/bin/open -a Terminal "$HOME/github/shortcuts_app/import_cd_to_notion.command"
+```
+
+ショートカット側の実行完了はTerminalの起動完了であり、CD取り込み・アップロードの完了ではありません。進捗と最終結果はTerminalで確認します。
+
+iCloud同期を有効にすればショートカット本体は同期対象になります。実行する各Macには、`~/github/shortcuts_app`とdiskflow、mise環境、`.env`設定を別途用意してください。配置が違う場合はショートカットのシェルスクリプト内のパスを変更します。Mac専用なのでiPhone・iPadでは実行できません。
+
+生成処理は`create_cd_import_shortcut.py`です。plistを構成し、macOS標準の`shortcuts sign --mode anyone`で署名します。署名時はAppleの検証サービスに起動処理を送信しますが、音声・画像・認証情報は含めません。署名済みファイルはGit管理から除外し、生成コードのみ管理します。
+
+## 従来の.appからの起動
+
 Spotlight用アプリは次のコマンドで作成します。作成だけでは取り込みもアップロードも始まりません。既存アプリは上書きしません。
 
 ```bash
@@ -27,7 +54,7 @@ mise run install-cd-shortcut
 
 `~/Applications/CDをNotionへ.app`が作成されます。Spotlightで「CDをNotionへ」を検索して起動するとTerminalが開きます。初回はTerminalの操作許可を求められる場合があります。リポジトリを移動した場合は、既存の起動アプリを手動で移動してから作り直してください。
 
-macOSのショートカットから呼ぶ場合は、「シェルスクリプトを実行」に次を設定します。Terminalで動くため、アルバム候補の番号選択なども可能です。
+既存のショートカットへ自分で組み込む場合も、「シェルスクリプトを実行」で`.command`を開けます。Terminalで動くため、アルバム候補の番号選択なども可能です。
 
 ```zsh
 open "$HOME/github/shortcuts_app/import_cd_to_notion.command"

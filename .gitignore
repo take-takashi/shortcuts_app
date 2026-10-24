@@ -138,3 +138,6 @@ bitfan_storage_state.json
 
 # Test data
 tests/private_data/
+
+# Signed shortcut exports (keep generators, not signing metadata, in Git)
+*.shortcut
