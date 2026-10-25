@@ -11,11 +11,6 @@ description = "CDを取り込み、曲とカバー・原本ZIPをNotionへ登録
 raw_args = true
 run = "uv run --locked python import_cd_to_notion.py"
 
-[tasks.export-cd-shortcut]
-description = "ショートカット.app用のCD取り込みファイルを生成・署名"
-raw_args = true
-run = "uv run --locked python create_cd_import_shortcut.py"
-
 [tasks.install-cd-shortcut]
 description = "Spotlight用の「CDをNotionへ」アプリを作成"
 raw_args = true

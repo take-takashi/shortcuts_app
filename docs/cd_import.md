@@ -23,8 +23,8 @@ NOTION_DATABASE_TAGS_ID=your_tags_database_id_here
 次のコマンドで、ショートカット.appに追加できる署名済みファイルを生成します。生成しただけでは追加も取り込みも始まりません。既存ファイルは上書きしません。
 
 ```bash
-cd ~/github/shortcuts_app
-mise run export-cd-shortcut
+cd ~/github/shortcuts_app/create_shortcuts
+mise run cd-import
 ```
 
 `~/Downloads/CDをNotionへ（ショートカット）.shortcut`を開き、内容を確認して「ショートカットを追加」を押してください。追加後はショートカット.appやSpotlightから起動できます。従来の.appと区別できるよう、名前に「ショートカット」を付けています。
@@ -41,7 +41,9 @@ mise run export-cd-shortcut
 
 iCloud同期を有効にすればショートカット本体は同期対象になります。実行する各Macには、`~/github/shortcuts_app`とdiskflow、mise環境、`.env`設定を別途用意してください。配置が違う場合はショートカットのシェルスクリプト内のパスを変更します。Mac専用なのでiPhone・iPadでは実行できません。
 
-生成処理は`create_cd_import_shortcut.py`です。plistを構成し、macOS標準の`shortcuts sign --mode anyone`で署名します。署名時はAppleの検証サービスに起動処理を送信しますが、音声・画像・認証情報は含めません。署名済みファイルはGit管理から除外し、生成コードのみ管理します。
+CD用の定義は`create_shortcuts/definitions/cd_import.py`、共通の生成・署名処理は`create_shortcuts/builder.py`で管理します。タスク名も定義名と同じ`cd-import`です。追加方法とXML出力は[`create_shortcuts/`の説明](../create_shortcuts/README.md)を参照してください。
+
+plistを構成し、macOS標準の`shortcuts sign --mode anyone`で署名します。CD用定義は署名時に起動処理だけをAppleの検証サービスへ送信し、音声・画像・認証情報は含めません。署名済みファイルはGit管理から除外し、生成コードのみ管理します。
 
 ## 従来の.appからの起動
 

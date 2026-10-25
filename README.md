@@ -2,13 +2,17 @@
 
 Mac, iOSのショートカット.appで使うスクリプトなどをまとめる
 
+## ショートカットをPythonで作成
+
+生成用の共通ライブラリと用途別の手順定義は[`create_shortcuts/`](create_shortcuts/README.md)で管理します。`builder.py`がアクション・plist生成・署名を担当し、`definitions/`へ個別のショートカットを追加します。閲覧用XMLの出力にも対応しています。
+
 ## CDを取り込んでNotionへ保存
 
 `mise run import-cd`でdiskflowを起動し、完成AACを曲ごとにNotionへ登録します。アルバム名のタグページには本文先頭にカバー画像、その直後に原本ZIPを配置し、アイコンにも同じ画像を設定します。ZIPからはCDなしで未加工WAVの取り出しやAACの再生成ができます。
 
 ```bash
 # ショートカット.app用の署名済みファイルを生成。生成後に開いて「追加」
-mise run export-cd-shortcut
+mise -C create_shortcuts run cd-import
 
 # Terminalから直接起動する場合
 mise run import-cd

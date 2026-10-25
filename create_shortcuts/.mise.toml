@@ -1,0 +1,5 @@
+[tasks.cd-import]
+description = "cd_import.pyの定義からショートカットを作成・署名"
+dir = ".."
+raw_args = true
+run = "uv run --locked python -m create_shortcuts.definitions.cd_import"

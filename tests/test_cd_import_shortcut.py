@@ -1,15 +1,17 @@
 import plistlib
 import subprocess
+import tomllib
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
-import create_cd_import_shortcut as shortcut
+from create_shortcuts import builder
+from create_shortcuts.definitions import cd_import as shortcut
 
 
 def test_workflow_uses_native_actions_and_cancel_before_launch():
-    data = shortcut.workflow()
+    data = shortcut.create_shortcut().to_plist()
     actions = data["WFWorkflowActions"]
     assert [a["WFWorkflowActionIdentifier"] for a in actions] == [
         "is.workflow.actions.comment",
@@ -29,7 +31,9 @@ def test_workflow_uses_native_actions_and_cancel_before_launch():
 
 def test_export_contains_no_personal_home_or_credentials(monkeypatch):
     monkeypatch.setenv("NOTION_TOKEN", "do-not-export-this-token")
-    data = plistlib.dumps(shortcut.workflow(), fmt=plistlib.FMT_XML).decode()
+    data = plistlib.dumps(
+        shortcut.create_shortcut().to_plist(), fmt=plistlib.FMT_XML
+    ).decode()
     assert str(Path.home()) not in data
     assert "do-not-export-this-token" not in data
     assert "$HOME/github/shortcuts_app/import_cd_to_notion.command" in data
@@ -84,9 +88,9 @@ def test_build_does_not_replace_existing_files(tmp_path, monkeypatch, kind):
     else:
         target.symlink_to(tmp_path / "missing")
     run = Mock()
-    monkeypatch.setattr(shortcut.subprocess, "run", run)
+    monkeypatch.setattr(builder.subprocess, "run", run)
     with pytest.raises(FileExistsError):
-        shortcut.build(target)
+        shortcut.create_shortcut().export(target)
     run.assert_not_called()
     assert target.is_symlink() if kind == "symlink" else target.read_bytes() == b"keep"
 
@@ -97,27 +101,29 @@ def test_signs_binary_plist_and_never_runs_or_imports_shortcut(tmp_path, monkeyp
         assert kwargs["check"] is True
         source = Path(command[command.index("--input") + 1])
         assert source.read_bytes().startswith(b"bplist00")
-        assert plistlib.loads(source.read_bytes()) == shortcut.workflow()
+        assert (
+            plistlib.loads(source.read_bytes()) == shortcut.create_shortcut().to_plist()
+        )
         Path(command[command.index("--output") + 1]).write_bytes(b"signed-shortcut")
         return subprocess.CompletedProcess(command, 0)
 
     run = Mock(side_effect=sign)
-    monkeypatch.setattr(shortcut.subprocess, "run", run)
+    monkeypatch.setattr(builder.subprocess, "run", run)
     target = tmp_path / "CD.shortcut"
-    assert shortcut.build(target) == target
+    assert shortcut.create_shortcut().export(target) == target
     assert target.read_bytes() == b"signed-shortcut"
     assert run.call_count == 1
 
 
 def test_sign_failure_leaves_no_importable_partial_file(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        shortcut.subprocess,
+        builder.subprocess,
         "run",
         Mock(side_effect=subprocess.CalledProcessError(1, "shortcuts sign")),
     )
     target = tmp_path / "CD.shortcut"
     with pytest.raises(subprocess.CalledProcessError):
-        shortcut.build(target)
+        shortcut.create_shortcut().export(target)
     assert not target.exists()
 
 
@@ -128,12 +134,34 @@ def test_publish_race_preserves_other_file(tmp_path, monkeypatch):
         Path(command[command.index("--output") + 1]).write_bytes(b"signed")
         target.write_bytes(b"created-by-someone-else")
 
-    monkeypatch.setattr(shortcut.subprocess, "run", sign)
+    monkeypatch.setattr(builder.subprocess, "run", sign)
     with pytest.raises(FileExistsError):
-        shortcut.build(target)
+        shortcut.create_shortcut().export(target)
     assert target.read_bytes() == b"created-by-someone-else"
 
 
 def test_rejects_non_shortcut_output(tmp_path):
     with pytest.raises(ValueError):
-        shortcut.build(tmp_path / "CD.app")
+        shortcut.create_shortcut().export(tmp_path / "CD.app")
+
+
+def test_task_name_matches_definition_and_has_no_aliases():
+    package = Path(shortcut.__file__).resolve().parents[1]
+    config = tomllib.loads((package / ".mise.toml").read_text())
+    name = Path(shortcut.__file__).stem.replace("_", "-")
+    assert set(config["tasks"]) == {name}
+    task = config["tasks"][name]
+    assert "alias" not in task
+    assert (
+        task["run"]
+        == f"uv run --locked python -m create_shortcuts.definitions.{Path(shortcut.__file__).stem}"
+    )
+    assert (package / task["dir"]).resolve() == package.parent
+
+
+def test_no_legacy_task_or_script_entry_point_remains():
+    root = Path(shortcut.__file__).resolve().parents[2]
+    config = tomllib.loads((root / ".mise.toml").read_text())
+    assert "export-cd-shortcut" not in config["tasks"]
+    assert "create-cd-shortcut" not in config["tasks"]
+    assert not (root / "create_cd_import_shortcut.py").exists()

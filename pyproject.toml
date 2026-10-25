@@ -29,6 +29,8 @@ packages = [
     "MyNotionHelper",
     "MyFfmpegHelper",
     "MyLoggerHelper",
+    "create_shortcuts",
+    "create_shortcuts.definitions",
 ]
 
 [dependency-groups]
