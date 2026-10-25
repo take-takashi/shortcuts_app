@@ -9,13 +9,36 @@ from create_shortcuts import Shortcut
 
 NAME = "CDをNotionへ（ショートカット）"
 # iCloudで別のMacへ同期しても、このMacのユーザー名は埋め込まない。
-LAUNCH_SCRIPT = """set -eu
-launcher="$HOME/github/shortcuts_app/import_cd_to_notion.command"
-if [ ! -x "$launcher" ]; then
-    printf '%s\\n' "起動スクリプトが見つかりません: $launcher" >&2
+LAUNCH_SCRIPT = r"""set -eu
+project="$HOME/github/shortcuts_app"
+if [[ ! -d "$project" ]]; then
+    printf '%s\n' "プロジェクトが見つかりません: $project" >&2
     exit 1
 fi
-/usr/bin/open -a Terminal "$launcher"
+mise="${commands[mise]:-}"
+if [[ -z "$mise" ]]; then
+    for candidate in "$HOME/.local/bin/mise" /opt/homebrew/bin/mise /usr/local/bin/mise; do
+        if [[ -x "$candidate" ]]; then
+            mise="$candidate"
+            break
+        fi
+    done
+fi
+if [[ -z "$mise" ]]; then
+    printf '%s\n' 'miseが見つかりません。' >&2
+    exit 1
+fi
+/usr/bin/osascript - "$project" "$mise" <<'APPLESCRIPT'
+on run argv
+    set projectDir to item 1 of argv
+    set misePath to item 2 of argv
+    set commandText to "cd " & quoted form of projectDir & " && " & quoted form of misePath & " run import-cd"
+    tell application "Terminal"
+        activate
+        do script commandText
+    end tell
+end run
+APPLESCRIPT
 """
 
 

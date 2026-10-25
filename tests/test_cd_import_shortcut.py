@@ -1,4 +1,5 @@
 import plistlib
+import shlex
 import subprocess
 import tomllib
 from pathlib import Path
@@ -36,7 +37,9 @@ def test_export_contains_no_personal_home_or_credentials(monkeypatch):
     ).decode()
     assert str(Path.home()) not in data
     assert "do-not-export-this-token" not in data
-    assert "$HOME/github/shortcuts_app/import_cd_to_notion.command" in data
+    assert "$HOME/github/shortcuts_app" in data
+    assert ".command" not in data
+    assert "/usr/bin/osascript" in data
 
 
 def test_launch_script_has_valid_shell_syntax():
@@ -45,7 +48,7 @@ def test_launch_script_has_valid_shell_syntax():
     )
 
 
-def test_missing_launcher_fails_without_opening_terminal(tmp_path):
+def test_missing_project_fails_without_opening_terminal(tmp_path):
     result = subprocess.run(
         ["/bin/zsh", "-c", shortcut.LAUNCH_SCRIPT],
         env={"HOME": str(tmp_path), "PATH": ""},
@@ -56,28 +59,99 @@ def test_missing_launcher_fails_without_opening_terminal(tmp_path):
     assert "見つかりません" in result.stderr
 
 
-def test_launch_uses_each_macs_home_and_only_opens_command_file(tmp_path):
-    home = tmp_path / 'home with spaces and "quotes"'
-    launcher = home / "github/shortcuts_app/import_cd_to_notion.command"
-    launcher.parent.mkdir(parents=True)
-    launcher.write_text("#!/bin/zsh\nexit 99\n")
-    launcher.chmod(0o755)
-    fake_open = tmp_path / "open"
+def test_missing_mise_fails_without_opening_terminal(tmp_path):
+    (tmp_path / "github/shortcuts_app").mkdir(parents=True)
+    script = shortcut.LAUNCH_SCRIPT.replace(
+        "/opt/homebrew/bin/mise", shlex.quote(str(tmp_path / "missing-brew"))
+    ).replace("/usr/local/bin/mise", shlex.quote(str(tmp_path / "missing-local")))
+    result = subprocess.run(
+        ["/bin/zsh", "-c", script],
+        env={"HOME": str(tmp_path), "PATH": ""},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "miseが見つかりません" in result.stderr
+
+
+@pytest.mark.parametrize("mise_location", ["path", "local"])
+def test_launch_passes_paths_as_arguments_and_never_runs_mise_itself(
+    tmp_path, mise_location
+):
+    home = tmp_path / "home with spaces, 'single' and \"double\" quotes"
+    project = home / "github/shortcuts_app"
+    project.mkdir(parents=True)
+    bin_dir = tmp_path / "bin" if mise_location == "path" else home / ".local/bin"
+    bin_dir.mkdir(parents=True)
+    mise = bin_dir / "mise"
+    mise.write_text("#!/bin/zsh\nexit 99\n")
+    mise.chmod(0o755)
+    fake_osascript = tmp_path / "osascript"
     recorded = tmp_path / "arguments"
-    fake_open.write_text('#!/bin/zsh\nprintf "%s\\n" "$@" > "$RECORDED"\n')
-    fake_open.chmod(0o755)
-    script = shortcut.LAUNCH_SCRIPT.replace("/usr/bin/open", '"$FAKE_OPEN"')
+    recorded_script = tmp_path / "applescript"
+    fake_osascript.write_text(
+        '#!/bin/zsh\nprintf "%s\\n" "$@" > "$RECORDED"\nwhile IFS= read -r line; do printf "%s\\n" "$line"; done > "$RECORDED_SCRIPT"\n'
+    )
+    fake_osascript.chmod(0o755)
+    script = shortcut.LAUNCH_SCRIPT.replace("/usr/bin/osascript", '"$FAKE_OSASCRIPT"')
     subprocess.run(
         ["/bin/zsh", "-c", script],
         check=True,
         env={
             "HOME": str(home),
-            "FAKE_OPEN": str(fake_open),
+            "FAKE_OSASCRIPT": str(fake_osascript),
             "RECORDED": str(recorded),
-            "PATH": "",
+            "RECORDED_SCRIPT": str(recorded_script),
+            "PATH": str(bin_dir) if mise_location == "path" else "",
         },
     )
-    assert recorded.read_text().splitlines() == ["-a", "Terminal", str(launcher)]
+    assert recorded.read_text().splitlines() == ["-", str(project), str(mise)]
+    assert 'tell application "Terminal"' in recorded_script.read_text()
+    assert "do script commandText" in recorded_script.read_text()
+    assert " run import-cd" in recorded_script.read_text()
+    assert ".command" not in recorded_script.read_text()
+
+
+def applescript_source():
+    _, marker, body = shortcut.LAUNCH_SCRIPT.partition("<<'APPLESCRIPT'\n")
+    assert marker
+    source, marker, _ = body.partition("\nAPPLESCRIPT")
+    assert marker
+    return source
+
+
+def test_applescript_compiles_without_running_terminal(tmp_path):
+    source = tmp_path / "launcher.applescript"
+    source.write_text(applescript_source())
+    subprocess.run(
+        ["/usr/bin/osacompile", "-o", str(tmp_path / "launcher.scpt"), str(source)],
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_terminal_command_quotes_paths_without_running_import(tmp_path):
+    prefix, marker, _ = applescript_source().partition(
+        '    tell application "Terminal"'
+    )
+    assert marker and "do script" not in prefix
+    project = str(tmp_path / "project with 'single' and \"double\" quotes")
+    mise = str(tmp_path / "mise with spaces")
+    result = subprocess.run(
+        ["/usr/bin/osascript", "-", project, mise],
+        input=prefix + "    return commandText\nend run\n",
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert shlex.split(result.stdout.strip()) == [
+        "cd",
+        project,
+        "&&",
+        mise,
+        "run",
+        "import-cd",
+    ]
 
 
 @pytest.mark.parametrize("kind", ["file", "symlink"])

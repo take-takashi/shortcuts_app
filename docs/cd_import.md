@@ -29,13 +29,11 @@ mise run cd-import
 
 `~/Downloads/CDをNotionへ（ショートカット）.shortcut`を開き、内容を確認して「ショートカットを追加」を押してください。追加後はショートカット.appやSpotlightから起動できます。従来の.appと区別できるよう、名前に「ショートカット」を付けています。
 
-中身はコメント、キャンセル可能な確認、シェルスクリプトの3アクションです。実行すると新しいCDの取り込みを確認し、続行した場合だけTerminalで既存の`.command`を開きます。まず試すだけなら確認をキャンセルしてください。取り込み済みのCDで再実行すると、別の出力として重複登録される場合があります。
+中身はコメント、キャンセル可能な確認、シェルスクリプトの3アクションです。実行すると新しいCDの取り込みを確認し、続行した場合だけ`osascript`からTerminalを開いて、リポジトリのルートで`mise run import-cd`を直接実行します。`.command`や`.app`は経由しません。まず試すだけなら確認をキャンセルしてください。取り込み済みのCDで再実行すると、別の出力として重複登録される場合があります。
 
-初回にスクリプト実行の許可を求められた場合は、ショートカット.appの「設定」→「詳細」で「スクリプトの実行を許可」を確認してください。スクリプトは次の起動処理だけで、Pythonの音声処理やNotionトークンはファイルに埋め込みません。
+初回にスクリプト実行の許可を求められた場合は、ショートカット.appの「設定」→「詳細」で「スクリプトの実行を許可」を確認してください。Terminalの操作許可を求められる場合もあります。Pythonの音声処理やNotionトークンはファイルに埋め込みません。
 
-```zsh
-/usr/bin/open -a Terminal "$HOME/github/shortcuts_app/import_cd_to_notion.command"
-```
+登録済みショートカットのShell欄は、`create_shortcuts/definitions/cd_import.py`の`LAUNCH_SCRIPT`にある内容へ置き換えます。Python定義の変更は、登録済みショートカットへ自動では反映されません。シェルは`/bin/zsh`を使います。`mise`はPATH、`~/.local/bin`、Apple Silicon・IntelのHomebrew標準パスから探し、パスに空白や引用符があっても扱えるようAppleScriptへ引数で渡します。
 
 ショートカット側の実行完了はTerminalの起動完了であり、CD取り込み・アップロードの完了ではありません。進捗と最終結果はTerminalで確認します。
 
@@ -56,11 +54,7 @@ mise run install-cd-shortcut
 
 `~/Applications/CDをNotionへ.app`が作成されます。Spotlightで「CDをNotionへ」を検索して起動するとTerminalが開きます。初回はTerminalの操作許可を求められる場合があります。リポジトリを移動した場合は、既存の起動アプリを手動で移動してから作り直してください。
 
-既存のショートカットへ自分で組み込む場合も、「シェルスクリプトを実行」で`.command`を開けます。Terminalで動くため、アルバム候補の番号選択なども可能です。
-
-```zsh
-open "$HOME/github/shortcuts_app/import_cd_to_notion.command"
-```
+この旧`.app`は`.command`を経由します。ショートカット.app版はこの経路を使いません。
 
 ## 通常の取り込み
 
