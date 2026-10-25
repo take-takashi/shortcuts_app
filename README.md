@@ -11,14 +11,14 @@ Mac, iOSのショートカット.appで使うスクリプトなどをまとめ�
 `mise run import-cd`でdiskflowを起動し、完成AACを曲ごとにNotionへ登録します。アルバム名のタグページには本文先頭にカバー画像、その直後に原本ZIPを配置し、アイコンにも同じ画像を設定します。ZIPからはCDなしで未加工WAVの取り出しやAACの再生成ができます。
 
 ```bash
-# ショートカット.app用の署名済みファイルを生成。生成後に開いて「追加」
+# 登録名・UUIDを確認し、作成・署名して追加画面を開く（置換は画面で確認）
 mise -C create_shortcuts run cd-import
 
 # Terminalから直接起動する場合
 mise run import-cd
 ```
 
-生成先は`~/Downloads/CDをNotionへ（ショートカット）.shortcut`です。追加後はショートカット.appやSpotlightから起動できます。実行時の確認をキャンセルすれば、CD読み取りもアップロードも始まりません。
+対象名は`CDを取り込んでNotionへUpload`です。初回で未登録の場合だけ`--new`を指定します。登録が0件・複数の場合は通常実行を止め、同名登録を無確認で置き換えません。追加後はショートカット.appやSpotlightから起動できます。実行時の確認をキャンセルすれば、CD読み取りもアップロードも始まりません。
 
 認証設定、画像の指定、失敗後の再開、ZIPからの復元は[CD取り込みの説明](docs/cd_import.md)を参照してください。`--prepare-only`ならNotionへ接続せず、AACとZIPの作成まで確認できます。
 

@@ -5,9 +5,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from create_shortcuts import Shortcut
+from create_shortcuts import Shortcut, app
 
-NAME = "CDをNotionへ（ショートカット）"
+NAME = "CDを取り込んでNotionへUpload"
 # iCloudで別のMacへ同期しても、このMacのユーザー名は埋め込まない。
 LAUNCH_SCRIPT = r"""set -eu
 project="$HOME/github/shortcuts_app"
@@ -59,14 +59,31 @@ def create_shortcut() -> Shortcut:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
-        description="ショートカット.app用のCD取り込みファイルを生成・署名します。取り込みは開始しません。"
+        description="登録名とUUIDを確認し、ショートカットを作成・署名して追加画面を開きます。取り込みは開始しません。"
     )
     parser.add_argument(
-        "--output", type=Path, default=Path.home() / "Downloads" / f"{NAME}.shortcut"
+        "--output",
+        type=Path,
+        help="出力先。省略時は実行ごとに別のキャッシュフォルダへ保存",
+    )
+    parser.add_argument(
+        "--new", action="store_true", help="同名の登録がない初回だけ、新規作成を許可"
     )
     args = parser.parse_args(argv)
     try:
-        print(create_shortcut().export(args.output))
+        output = args.output or app.new_output_path("cd-import", NAME)
+        app.check_output_name(output, NAME)
+        target = app.resolve_target(NAME, new=args.new)
+        if target is None:
+            print(f"新規作成: {NAME}", flush=True)
+        else:
+            print(f"更新候補: {target.name} ({target.identifier})", flush=True)
+        output = create_shortcut().export(output)
+        print(f"生成ファイル: {output}", flush=True)
+        app.open_import(output, name=NAME, expected_target=target, new=args.new)
+        print(
+            "追加画面を開きました。アプリ内の追加・置換は画面で確認してください。取り込み自体は実行していません。"
+        )
         return 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         print(f"作成できませんでした: {exc}", file=sys.stderr)

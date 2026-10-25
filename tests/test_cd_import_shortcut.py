@@ -7,7 +7,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from create_shortcuts import builder
+from create_shortcuts import app, builder
 from create_shortcuts.definitions import cd_import as shortcut
 
 
@@ -239,3 +239,61 @@ def test_no_legacy_task_or_script_entry_point_remains():
     assert "export-cd-shortcut" not in config["tasks"]
     assert "create-cd-shortcut" not in config["tasks"]
     assert not (root / "create_cd_import_shortcut.py").exists()
+
+
+def test_definition_name_matches_confirmed_registered_name():
+    assert shortcut.NAME == "CDを取り込んでNotionへUpload"
+
+
+def test_cli_checks_target_generates_and_opens_preview_only(
+    tmp_path, monkeypatch, capsys
+):
+    target = app.RegisteredShortcut(
+        shortcut.NAME, "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
+    )
+    resolve = Mock(return_value=target)
+    opened = Mock()
+    definition = Mock()
+    definition.export.side_effect = lambda path: path
+    monkeypatch.setattr(app, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(app, "resolve_target", resolve)
+    monkeypatch.setattr(app, "open_import", opened)
+    monkeypatch.setattr(shortcut, "create_shortcut", lambda: definition)
+    assert shortcut.main([]) == 0
+    resolve.assert_called_once_with(shortcut.NAME, new=False)
+    output = definition.export.call_args.args[0]
+    assert output.name == shortcut.NAME + ".shortcut"
+    assert output.is_relative_to(tmp_path / "cd-import")
+    opened.assert_called_once_with(
+        output, name=shortcut.NAME, expected_target=target, new=False
+    )
+    text = capsys.readouterr().out
+    assert target.identifier in text
+    assert "確認" in text
+
+
+def test_cli_refuses_ambiguous_or_missing_target_before_signing(tmp_path, monkeypatch):
+    definition = Mock()
+    monkeypatch.setattr(shortcut, "create_shortcut", lambda: definition)
+    monkeypatch.setattr(
+        app, "resolve_target", Mock(side_effect=RuntimeError("対象を確認"))
+    )
+    opened = Mock()
+    monkeypatch.setattr(app, "open_import", opened)
+    assert shortcut.main([]) == 1
+    definition.export.assert_not_called()
+    opened.assert_not_called()
+
+
+def test_cli_new_mode_is_explicit(tmp_path, monkeypatch):
+    definition = Mock()
+    definition.export.side_effect = lambda path: path
+    resolve = Mock(return_value=None)
+    monkeypatch.setattr(shortcut, "create_shortcut", lambda: definition)
+    monkeypatch.setattr(app, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(app, "resolve_target", resolve)
+    opened = Mock()
+    monkeypatch.setattr(app, "open_import", opened)
+    assert shortcut.main(["--new"]) == 0
+    resolve.assert_called_once_with(shortcut.NAME, new=True)
+    assert opened.call_args.kwargs["new"] is True
