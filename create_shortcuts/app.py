@@ -2,6 +2,7 @@
 
 import re
 import subprocess
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,23 +43,19 @@ def list_shortcuts() -> list[RegisteredShortcut]:
     return shortcuts
 
 
-def resolve_target(name: str, *, new: bool = False) -> RegisteredShortcut | None:
-    matches = [item for item in list_shortcuts() if item.name == name]
+def find_registered(name: str) -> RegisteredShortcut | None:
+    """存在確認のみ。見つけたUUIDをインポートの置換先に指定はしない。"""
+    normalized = unicodedata.normalize("NFC", name)
+    matches = [
+        item
+        for item in list_shortcuts()
+        if unicodedata.normalize("NFC", item.name) == normalized
+    ]
     if len(matches) > 1:
         raise RuntimeError(
             f"同じ名前の登録が複数あります。対象を整理してから再実行してください: {name}"
         )
-    if matches:
-        if new:
-            raise RuntimeError(
-                f"すでに登録済みです。--newを外して更新候補を確認してください: {name}"
-            )
-        return matches[0]
-    if not new:
-        raise RuntimeError(
-            f"対象が見つかりません。登録名と定義のNAMEを確認してください。初回作成の場合だけ--newを指定します: {name}"
-        )
-    return None
+    return matches[0] if matches else None
 
 
 def _filename(name: str) -> str:
@@ -75,28 +72,23 @@ def new_output_path(definition: str, name: str) -> Path:
 
 
 def check_output_name(path: Path, name: str) -> None:
-    if path.name != _filename(name):
+    if unicodedata.normalize("NFC", path.name) != unicodedata.normalize(
+        "NFC", _filename(name)
+    ):
         raise ValueError(
             f"インポート時の名前を揃えるため、ファイル名は{_filename(name)}にしてください。"
         )
 
 
-def open_import(
-    path: Path,
-    *,
-    name: str,
-    expected_target: RegisteredShortcut | None,
-    new: bool = False,
-) -> None:
-    """署名中に対象が変わっていないか確認し、追加画面だけを開く。"""
+def open_import(path: Path, *, name: str) -> None:
+    """未登録の名前だけ追加画面を開く。既存の更新機能ではない。"""
     path = path.expanduser().absolute()
     check_output_name(path, name)
     if path.is_symlink() or not path.is_file():
         raise ValueError("署名済みの通常ファイルを指定してください。")
-    current = resolve_target(name, new=new)
-    if current != expected_target:
+    if find_registered(name) is not None:
         raise RuntimeError(
-            "署名中に対象の登録が変更されました。名前とUUIDを再確認してください。"
+            f"同名のショートカットが登録済みです。重複追加を避けるため画面を開きません: {name}"
         )
     subprocess.run(
         ["/usr/bin/open", "-a", "Shortcuts", str(path)], check=True, timeout=30

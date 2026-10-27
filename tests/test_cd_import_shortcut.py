@@ -245,38 +245,37 @@ def test_definition_name_matches_confirmed_registered_name():
     assert shortcut.NAME == "CDを取り込んでNotionへUpload"
 
 
-def test_cli_checks_target_generates_and_opens_preview_only(
+def test_cli_existing_name_generates_file_without_opening_preview(
     tmp_path, monkeypatch, capsys
 ):
     target = app.RegisteredShortcut(
         shortcut.NAME, "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
     )
-    resolve = Mock(return_value=target)
+    find = Mock(return_value=target)
     opened = Mock()
     definition = Mock()
     definition.export.side_effect = lambda path: path
     monkeypatch.setattr(app, "CACHE_DIR", tmp_path)
-    monkeypatch.setattr(app, "resolve_target", resolve)
+    monkeypatch.setattr(app, "find_registered", find)
     monkeypatch.setattr(app, "open_import", opened)
     monkeypatch.setattr(shortcut, "create_shortcut", lambda: definition)
     assert shortcut.main([]) == 0
-    resolve.assert_called_once_with(shortcut.NAME, new=False)
+    find.assert_called_once_with(shortcut.NAME)
     output = definition.export.call_args.args[0]
     assert output.name == shortcut.NAME + ".shortcut"
     assert output.is_relative_to(tmp_path / "cd-import")
-    opened.assert_called_once_with(
-        output, name=shortcut.NAME, expected_target=target, new=False
-    )
+    opened.assert_not_called()
     text = capsys.readouterr().out
     assert target.identifier in text
-    assert "確認" in text
+    assert "更新しません" in text
+    assert "開きません" in text
 
 
-def test_cli_refuses_ambiguous_or_missing_target_before_signing(tmp_path, monkeypatch):
+def test_cli_refuses_ambiguous_name_before_signing(tmp_path, monkeypatch):
     definition = Mock()
     monkeypatch.setattr(shortcut, "create_shortcut", lambda: definition)
     monkeypatch.setattr(
-        app, "resolve_target", Mock(side_effect=RuntimeError("対象を確認"))
+        app, "find_registered", Mock(side_effect=RuntimeError("対象を確認"))
     )
     opened = Mock()
     monkeypatch.setattr(app, "open_import", opened)
@@ -285,15 +284,16 @@ def test_cli_refuses_ambiguous_or_missing_target_before_signing(tmp_path, monkey
     opened.assert_not_called()
 
 
-def test_cli_new_mode_is_explicit(tmp_path, monkeypatch):
+def test_cli_unregistered_name_generates_and_opens_preview(tmp_path, monkeypatch):
     definition = Mock()
     definition.export.side_effect = lambda path: path
-    resolve = Mock(return_value=None)
+    find = Mock(return_value=None)
     monkeypatch.setattr(shortcut, "create_shortcut", lambda: definition)
     monkeypatch.setattr(app, "CACHE_DIR", tmp_path)
-    monkeypatch.setattr(app, "resolve_target", resolve)
+    monkeypatch.setattr(app, "find_registered", find)
     opened = Mock()
     monkeypatch.setattr(app, "open_import", opened)
-    assert shortcut.main(["--new"]) == 0
-    resolve.assert_called_once_with(shortcut.NAME, new=True)
-    assert opened.call_args.kwargs["new"] is True
+    assert shortcut.main([]) == 0
+    find.assert_called_once_with(shortcut.NAME)
+    output = definition.export.call_args.args[0]
+    opened.assert_called_once_with(output, name=shortcut.NAME)

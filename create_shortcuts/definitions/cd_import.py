@@ -59,31 +59,36 @@ def create_shortcut() -> Shortcut:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
-        description="登録名とUUIDを確認し、ショートカットを作成・署名して追加画面を開きます。取り込みは開始しません。"
+        description="ショートカットを作成・署名します。同名の登録がなければ追加画面を開きます。既存本体の更新・取り込みは行いません。"
     )
     parser.add_argument(
         "--output",
         type=Path,
         help="出力先。省略時は実行ごとに別のキャッシュフォルダへ保存",
     )
-    parser.add_argument(
-        "--new", action="store_true", help="同名の登録がない初回だけ、新規作成を許可"
-    )
     args = parser.parse_args(argv)
     try:
         output = args.output or app.new_output_path("cd-import", NAME)
         app.check_output_name(output, NAME)
-        target = app.resolve_target(NAME, new=args.new)
-        if target is None:
+        registered = app.find_registered(NAME)
+        if registered is None:
             print(f"新規作成: {NAME}", flush=True)
         else:
-            print(f"更新候補: {target.name} ({target.identifier})", flush=True)
+            print(
+                f"既存登録: {registered.name} ({registered.identifier})。本体は更新しません。",
+                flush=True,
+            )
         output = create_shortcut().export(output)
         print(f"生成ファイル: {output}", flush=True)
-        app.open_import(output, name=NAME, expected_target=target, new=args.new)
-        print(
-            "追加画面を開きました。アプリ内の追加・置換は画面で確認してください。取り込み自体は実行していません。"
-        )
+        if registered is None:
+            app.open_import(output, name=NAME)
+            print(
+                "新規追加画面を開きました。既存本体の更新・取り込みは行っていません。"
+            )
+        else:
+            print(
+                "ファイル生成のみ完了しました。重複追加を避けるため追加画面は開きません。登録済み本体は更新しません。"
+            )
         return 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         print(f"作成できませんでした: {exc}", file=sys.stderr)

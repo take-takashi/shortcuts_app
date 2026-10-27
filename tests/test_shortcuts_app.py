@@ -51,58 +51,63 @@ def test_listing_failure_propagates(monkeypatch):
         app.list_shortcuts()
 
 
-def test_resolves_one_exact_name(monkeypatch):
+def test_finds_one_exact_name(monkeypatch):
     monkeypatch.setattr(
         app, "list_shortcuts", lambda: [registered("other"), registered()]
     )
-    assert app.resolve_target("sample") == registered()
+    assert app.find_registered("sample") == registered()
 
 
-def test_missing_target_requires_explicit_new_mode(monkeypatch):
+def test_missing_name_returns_none(monkeypatch):
     monkeypatch.setattr(app, "list_shortcuts", lambda: [])
-    with pytest.raises(RuntimeError, match="--new"):
-        app.resolve_target("sample")
-    assert app.resolve_target("sample", new=True) is None
+    assert app.find_registered("sample") is None
 
 
-def test_new_mode_cannot_create_duplicate_existing_name(monkeypatch):
-    monkeypatch.setattr(app, "list_shortcuts", lambda: [registered()])
-    with pytest.raises(RuntimeError, match="登録済み"):
-        app.resolve_target("sample", new=True)
+def test_canonically_equivalent_japanese_names_match(monkeypatch):
+    record = registered("取り込んて\u3099")
+    monkeypatch.setattr(app, "list_shortcuts", lambda: [record])
+    assert app.find_registered("取り込んで") == record
 
 
-@pytest.mark.parametrize("new", [False, True])
-def test_duplicate_names_are_never_automatically_selected(monkeypatch, new):
+def test_duplicate_names_are_never_automatically_selected(monkeypatch):
     monkeypatch.setattr(
         app, "list_shortcuts", lambda: [registered(), registered(identifier=OTHER_ID)]
     )
     with pytest.raises(RuntimeError, match="複数"):
-        app.resolve_target("sample", new=new)
+        app.find_registered("sample")
 
 
-def test_import_preview_rechecks_target_and_only_opens_file(tmp_path, monkeypatch):
-    target = registered()
+def test_nfc_and_nfd_duplicates_are_not_selected(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "list_shortcuts",
+        lambda: [registered("取り込んで"), registered("取り込んて\u3099", OTHER_ID)],
+    )
+    with pytest.raises(RuntimeError, match="複数"):
+        app.find_registered("取り込んで")
+
+
+def test_import_preview_only_opens_for_unregistered_name(tmp_path, monkeypatch):
     path = tmp_path / "sample.shortcut"
     path.write_bytes(b"signed")
-    monkeypatch.setattr(app, "resolve_target", Mock(return_value=target))
+    find = Mock(return_value=None)
+    monkeypatch.setattr(app, "find_registered", find)
     run = Mock()
     monkeypatch.setattr(app.subprocess, "run", run)
-    app.open_import(path, name="sample", expected_target=target)
-    app.resolve_target.assert_called_once_with("sample", new=False)
+    app.open_import(path, name="sample")
+    find.assert_called_once_with("sample")
     assert run.call_args.args[0] == ["/usr/bin/open", "-a", "Shortcuts", str(path)]
     assert run.call_count == 1
 
 
-def test_changed_uuid_stops_before_opening_preview(tmp_path, monkeypatch):
+def test_existing_registration_stops_before_opening_preview(tmp_path, monkeypatch):
     path = tmp_path / "sample.shortcut"
     path.write_bytes(b"signed")
-    monkeypatch.setattr(
-        app, "resolve_target", lambda *args, **kwargs: registered(identifier=OTHER_ID)
-    )
+    monkeypatch.setattr(app, "find_registered", lambda name: registered())
     run = Mock()
     monkeypatch.setattr(app.subprocess, "run", run)
-    with pytest.raises(RuntimeError, match="変更"):
-        app.open_import(path, name="sample", expected_target=registered())
+    with pytest.raises(RuntimeError, match="登録済み"):
+        app.open_import(path, name="sample")
     run.assert_not_called()
 
 
@@ -110,7 +115,7 @@ def test_artifact_name_must_match_display_name(tmp_path):
     wrong = tmp_path / "different.shortcut"
     wrong.write_bytes(b"signed")
     with pytest.raises(ValueError, match="ファイル名"):
-        app.open_import(wrong, name="sample", expected_target=registered())
+        app.open_import(wrong, name="sample")
 
 
 def test_each_generation_has_unique_directory_and_same_file_name(tmp_path, monkeypatch):

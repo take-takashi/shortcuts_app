@@ -1,5 +1,5 @@
 [tasks.cd-import]
-description = "cd_import.pyの定義から作成・署名し、対象を確認して追加画面を開く"
+description = "cd_import.pyから作成・署名（未登録なら追加画面、既存はファイル生成のみ）"
 dir = ".."
 raw_args = true
 run = "uv run --locked python -m create_shortcuts.definitions.cd_import"
