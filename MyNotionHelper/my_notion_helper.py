@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import os
 import tempfile
@@ -444,6 +445,26 @@ class MyNotionHelper:
 
     @staticmethod
     def upload_reference(name: str, upload_id: str) -> dict:
+        # Notionのファイルプロパティの名前はUTF-16で100コード単位まで。
+        # 長い名前だけ短縮し、ハッシュで同じ接頭辞のファイルを区別する。
+        def units(text: str) -> int:
+            return len(text.encode("utf-16-le")) // 2
+
+        if units(name) > 100:
+            stem, extension = os.path.splitext(name)
+            if units(extension) > 32:
+                stem, extension = name, ""
+            digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
+            suffix = f"-{digest}{extension}"
+            remaining = 100 - units(suffix)
+            prefix = ""
+            for character in stem:
+                size = units(character)
+                if size > remaining:
+                    break
+                prefix += character
+                remaining -= size
+            name = prefix + suffix
         return {"name": name, "type": "file_upload", "file_upload": {"id": upload_id}}
 
     def attach_uploaded_file(

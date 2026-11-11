@@ -89,6 +89,55 @@ def test_file_property_puts_cover_and_zip_before_old_files(helper):
     )
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "a" * 96 + ".jpg",  # ちょうど100コード単位
+        "𝑻" * 48 + ".jpg",  # サロゲートペアを含めて100コード単位
+    ],
+)
+def test_file_reference_keeps_names_at_the_limit(name):
+    assert MyNotionHelper.upload_reference(name, "upload")["name"] == name
+
+
+def test_file_reference_shortens_long_unicode_names_without_collisions():
+    names = ["𝑻" * 50 + "ディズニー🎄" + tail + ".jpg" for tail in ("一", "二")]
+    shortened = [
+        MyNotionHelper.upload_reference(name, "upload")["name"] for name in names
+    ]
+
+    assert shortened[0] != shortened[1]
+    assert shortened[0] == MyNotionHelper.upload_reference(names[0], "other")["name"]
+    assert all(len(name.encode("utf-16-le")) // 2 <= 100 for name in shortened)
+    assert all(name.endswith(".jpg") for name in shortened)
+
+
+def test_upload_file_uses_short_name_for_property_and_preserves_local_name(
+    helper, tmp_path
+):
+    helper.upload_file_data = Mock(return_value="upload")
+    helper.attach_uploaded_file = Mock()
+    helper.notion.pages.retrieve.return_value = {
+        "properties": {"ファイル&メディア": {"type": "files", "files": []}}
+    }
+    # 実際の障害と同じく、Pythonの文字数は100以下でもUTF-16では100を超える。
+    source = tmp_path / ("𝑻" * 48 + "🎄.jpg")
+    source.write_bytes(b"image")
+
+    helper.upload_file("page", str(source))
+
+    helper.upload_file_data.assert_called_once_with(str(source))
+    helper.attach_uploaded_file.assert_called_once_with(
+        "page", "upload", source.name, "image"
+    )
+    properties = helper.notion.pages.update.call_args.kwargs["properties"]
+    saved = properties["ファイル&メディア"]["files"][0]
+    assert len(saved["name"].encode("utf-16-le")) // 2 <= 100
+    assert saved["name"].endswith(".jpg")
+    assert saved["file_upload"] == {"id": "upload"}
+    assert source.exists()
+
+
 def test_upload_size_is_obtained_from_workspace(helper):
     helper.notion.users.me.return_value = {
         "bot": {"workspace_limits": {"max_file_upload_size_in_bytes": 5242880}}
