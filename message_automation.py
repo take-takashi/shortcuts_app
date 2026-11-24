@@ -2,13 +2,15 @@
 
 import fcntl
 import logging
+import math
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import TextIO
 
@@ -16,8 +18,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 MAX_MESSAGE_LENGTH = 4096
 LOG_DIR_ENV = "MESSAGE_AUTOMATION_LOG_DIR"
 DEFAULT_LOG_DIR = Path.home() / "Library/Logs/shortcuts_app"
-# ログの出力先を変えても、同じユーザーのNotion処理は重複起動させない。
+# ログの出力先を変えても、同じユーザーのバックグラウンド処理は重複起動させない。
 STATE_DIR = Path.home() / "Library/Application Support/shortcuts_app"
+NOTION_LOCK_NAME = "auto-notion.lock"
+CAFFEINATE_LOCK_NAME = "caffeinate.lock"
 NOTION_WORKER_ARG = "--notion-worker"
 TAILSCALE_PATHS = (
     "/opt/homebrew/bin/tailscale",
@@ -25,6 +29,9 @@ TAILSCALE_PATHS = (
     "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
     str(Path.home() / "Applications/Tailscale.app/Contents/MacOS/Tailscale"),
 )
+CAFFEINATE_PATHS = ("/usr/bin/caffeinate",)
+CAFFEINATE_STOP_TIMEOUT_SECONDS = 3.0
+CAFFEINATE_PID_WAIT_SECONDS = 0.5
 
 logger = logging.getLogger(__name__)
 _log_handler: logging.Handler | None = None
@@ -57,10 +64,10 @@ def configure_logger() -> None:
     _log_handler = handler
 
 
-def acquire_notion_lock() -> TextIO | None:
+def acquire_lock(lock_name: str) -> TextIO | None:
     """起動前に排他ロックを取る。ファイルの存在やPIDの生死では判定しない。"""
     STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
-    lock_file = (STATE_DIR / "auto-notion.lock").open("a+", encoding="utf-8")
+    lock_file = (STATE_DIR / lock_name).open("a+", encoding="utf-8")
     try:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -70,6 +77,16 @@ def acquire_notion_lock() -> TextIO | None:
         lock_file.close()
         raise
     return lock_file
+
+
+def acquire_notion_lock() -> TextIO | None:
+    """Notion処理の排他ロックを取る。"""
+    return acquire_lock(NOTION_LOCK_NAME)
+
+
+def acquire_caffeinate_lock() -> TextIO | None:
+    """caffeinateの排他ロックを取る。"""
+    return acquire_lock(CAFFEINATE_LOCK_NAME)
 
 
 def run_notion() -> int:
@@ -124,7 +141,7 @@ def run_notion_worker(lock_fd: int) -> int:
 
     with os.fdopen(lock_fd, "a+", encoding="utf-8") as lock_file:
         inherited = os.fstat(lock_file.fileno())
-        expected = (STATE_DIR / "auto-notion.lock").stat()
+        expected = (STATE_DIR / NOTION_LOCK_NAME).stat()
         if (inherited.st_dev, inherited.st_ino) != (expected.st_dev, expected.st_ino):
             raise ValueError("ワーカーのロックFDが一致しません。")
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -224,6 +241,183 @@ def run_tailscale_off() -> int:
     return run_tailscale(False)
 
 
+def get_current_datetime() -> datetime:
+    """現在時刻を取得する（テスト時の差し替え用）。"""
+    return datetime.now()
+
+
+def calculate_caffeinate_timeout(
+    now: datetime | None = None,
+) -> tuple[int, datetime]:
+    """当日の23:59:59までの残り秒数と終了予定時刻を返す。"""
+    current = now if now is not None else get_current_datetime()
+    until = current.replace(hour=23, minute=59, second=59, microsecond=0)
+    remaining = math.ceil((until - current).total_seconds())
+    return max(remaining, 0), until
+
+
+def find_caffeinate() -> str:
+    """ShortcutsのPATHにない場合も、macOS標準パスからcaffeinateを探す。"""
+    for candidate in ("caffeinate", *CAFFEINATE_PATHS):
+        executable = shutil.which(candidate)
+        if executable:
+            return executable
+    raise FileNotFoundError("caffeinate CLIが見つかりません。")
+
+
+def read_caffeinate_pid(lock_path: Path) -> int | None:
+    """ロックファイルに記録されたcaffeinateのPIDを読み取る。"""
+    try:
+        content = lock_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in content.splitlines():
+        if line.startswith("pid="):
+            raw_pid = line.removeprefix("pid=").strip()
+            if raw_pid.isdigit() and int(raw_pid) > 0:
+                return int(raw_pid)
+    return None
+
+
+def is_caffeinate_process(pid: int) -> bool:
+    """対象PIDが実際にcaffeinateプロセスであることを確認する。"""
+    ps_executable = shutil.which("ps") or "/bin/ps"
+    completed = subprocess.run(
+        [ps_executable, "-p", str(pid), "-o", "comm="],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return False
+    command_name = completed.stdout.strip()
+    return bool(command_name) and Path(command_name).name == "caffeinate"
+
+
+def run_caffeinate_on() -> int:
+    """当日23:59:59まで本体スリープを抑制するcaffeinateをバックグラウンド起動する。"""
+    executable = find_caffeinate()
+    timeout_seconds, until = calculate_caffeinate_timeout()
+    if timeout_seconds <= 0:
+        logger.info(
+            "当日の期限を過ぎているため起動しませんでした。command=caffeinate:on until=%s",
+            until.isoformat(timespec="seconds"),
+        )
+        print("ALREADY_EXPIRED")
+        return 0
+
+    lock_file = acquire_caffeinate_lock()
+    if lock_file is None:
+        logger.info("重複起動をスキップしました。command=caffeinate:on ALREADY_RUNNING")
+        print("ALREADY_RUNNING")
+        return 0
+
+    # ロックFDをcaffeinateへ引き継ぎ、終了時にOSが自動でロック解放する構成にする。
+    with lock_file:
+        lock_file.seek(0)
+        lock_file.truncate()
+        lock_file.flush()
+
+        process = subprocess.Popen(
+            [executable, "-is", "-t", str(timeout_seconds)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            close_fds=True,
+            pass_fds=(lock_file.fileno(),),
+        )
+        until_text = until.isoformat(timespec="seconds")
+        lock_file.seek(0)
+        lock_file.truncate()
+        lock_file.write(f"pid={process.pid}\nuntil={until_text}\n")
+        lock_file.flush()
+
+        logger.info(
+            "スリープ抑制を開始しました。command=caffeinate:on pid=%s timeout=%ss until=%s",
+            process.pid,
+            timeout_seconds,
+            until_text,
+        )
+        print(f"CAFFEINATE_ON pid={process.pid} until={until_text}")
+    return 0
+
+
+def _report_caffeinate_not_running(reason: str) -> int:
+    """停止対象のcaffeinateが存在しないことをログと標準出力へ通知する。"""
+    logger.info("%s command=caffeinate:off NOT_RUNNING", reason)
+    print("NOT_RUNNING")
+    return 0
+
+
+def run_caffeinate_off() -> int:
+    """このスクリプトが起動したcaffeinateだけを検証したうえで停止する。"""
+    lock_path = STATE_DIR / CAFFEINATE_LOCK_NAME
+    if not lock_path.exists():
+        return _report_caffeinate_not_running("停止対象のcaffeinateは起動していません。")
+
+    lock_file = acquire_caffeinate_lock()
+    if lock_file is not None:
+        lock_file.close()
+        return _report_caffeinate_not_running("停止対象のcaffeinateは起動していません。")
+
+    # 起動直後のPID書き込みと重なった場合に備え、短時間だけリトライする。
+    pid = read_caffeinate_pid(lock_path)
+    pid_deadline = time.monotonic() + CAFFEINATE_PID_WAIT_SECONDS
+    while pid is None and time.monotonic() < pid_deadline:
+        probe_lock = acquire_caffeinate_lock()
+        if probe_lock is not None:
+            probe_lock.close()
+            return _report_caffeinate_not_running("停止前にcaffeinateが終了していました。")
+        time.sleep(0.02)
+        pid = read_caffeinate_pid(lock_path)
+
+    if pid is None:
+        message = "起動中のcaffeinateのPIDを取得できませんでした。"
+        logger.error("%s command=caffeinate:off", message)
+        print(message, file=sys.stderr)
+        return 1
+
+    # PID再利用による誤停止を防ぐため、対象がcaffeinateプロセスであることを確認する。
+    if not is_caffeinate_process(pid):
+        probe_lock = acquire_caffeinate_lock()
+        if probe_lock is not None:
+            probe_lock.close()
+            return _report_caffeinate_not_running("停止前にcaffeinateが終了していました。")
+        message = f"PID {pid} はcaffeinateプロセスではないため停止しませんでした。"
+        logger.error("%s command=caffeinate:off", message)
+        print(message, file=sys.stderr)
+        return 1
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+
+    # ロックが解放される（＝caffeinateプロセスが終了する）まで短時間待つ。
+    stop_deadline = time.monotonic() + CAFFEINATE_STOP_TIMEOUT_SECONDS
+    while True:
+        probe_lock = acquire_caffeinate_lock()
+        if probe_lock is not None:
+            probe_lock.close()
+            logger.info(
+                "スリープ抑制を停止しました。command=caffeinate:off pid=%s",
+                pid,
+            )
+            print("CAFFEINATE_OFF")
+            return 0
+        if time.monotonic() >= stop_deadline:
+            break
+        time.sleep(0.02)
+
+    message = f"caffeinate(pid={pid})の終了を確認できませんでした。"
+    logger.error("%s command=caffeinate:off", message)
+    print(message, file=sys.stderr)
+    return 1
+
+
 def run_health() -> int:
     print("OK")
     return 0
@@ -235,6 +429,8 @@ ACTIONS: dict[str, Callable[[], int]] = {
     "health": run_health,
     "tailscale:on": run_tailscale_on,
     "tailscale:off": run_tailscale_off,
+    "caffeinate:on": run_caffeinate_on,
+    "caffeinate:off": run_caffeinate_off,
 }
 
 

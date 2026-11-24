@@ -74,6 +74,8 @@ export MESSAGE_AUTOMATION_LOG_DIR="$HOME/Downloads"
 - `MAC|health`: `OK` を返します。Notion処理やCookieの診断は行いません。
 - `MAC|tailscale:on`: `tailscale up --timeout=20s` で接続し、成功時は `TAILSCALE_ON` を返します。
 - `MAC|tailscale:off`: `tailscale down` で切断し、成功時は `TAILSCALE_OFF` を返します。ログアウトやサービス停止は行いません。
+- `MAC|caffeinate:on`: `/usr/bin/caffeinate -is -t <残り秒数>` をバックグラウンド起動し、当日 `23:59:59` まで本体スリープを抑制します（ディスプレイの消灯は許可）。起動時は `CAFFEINATE_ON pid=... until=...`、稼働中の再実行は `ALREADY_RUNNING`、当日 `23:59:59` 以降は `ALREADY_EXPIRED` を返します。
+- `MAC|caffeinate:off`: `MAC|caffeinate:on` で起動した `caffeinate` プロセスを検証のうえ停止し、`CAFFEINATE_OFF`（未起動時は `NOT_RUNNING`）を返します。
 
 Tailscaleは、事前にアプリまたは `tailscaled` を起動し、ログインを済ませてください。CLIはPATHに加え、Homebrewの標準パスやアプリ内からも探します。接続・切断は完了を待って結果を返し、CLIが25秒以内に終了しない場合はエラーにします。`off` を送ると、Tailscale経由のリモート接続も切れます。
 
@@ -81,12 +83,12 @@ Tailscaleは、事前にアプリまたは `tailscaled` を起動し、ログイ
 
 | ファイル | 内容 |
 | --- | --- |
-| `message_automation-YYYYMMDD.log` | 受付・重複起動のスキップ・本処理の開始・完了・失敗、PID、終了コード、Tailscaleの操作結果とCLI出力 |
+| `message_automation-YYYYMMDD.log` | 受付・重複起動のスキップ・本処理の開始・完了・失敗、PID、終了コード、Tailscale・caffeinateの操作結果とCLI出力 |
 | `message_automation-notion-YYYYMMDD.log` | 本処理の標準出力・標準エラー（例外など） |
 
 Notionのバックグラウンド処理の標準入出力はShortcutsから切り離します。完了・失敗は通知ではなくログで確認してください。本処理側の `download_and_upload_for_notion-YYYYMMDD.log` も従来どおり出力されます。
 
-重複起動防止には `~/Library/Application Support/shortcuts_app/auto-notion.lock` のOSロックを使います。ログの出力先を変更しても重複起動は防止されます。終了後はロックが自動解放されるため、残ったロックファイルを削除する必要はありません。この制御は `message_automation.py` 経由の起動が対象です。
+重複起動防止には `~/Library/Application Support/shortcuts_app/auto-notion.lock`（Notion処理）および `caffeinate.lock`（スリープ抑制）のOSロックを使います。ログの出力先を変更しても重複起動は防止されます。終了後はロックが自動解放されるため、残ったロックファイルを削除する必要はありません。この制御は `message_automation.py` 経由の起動が対象で、`MAC|caffeinate:off` もこのロックとプロセス名を確認してから停止します。
 
 ## Geminiで作成した音楽の変換
 

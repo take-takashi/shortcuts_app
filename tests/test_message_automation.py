@@ -5,6 +5,7 @@ import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -58,6 +59,12 @@ def event_log(log_dir: Path) -> str:
         "MAC|tailscale:on --reset",
         "MAC|tailscale:on; echo injected",
         "MAC|tailscale:off|extra",
+        "caffeinate:on",
+        "caffeinate:off",
+        "MAC|caffeinate:start",
+        "MAC|caffeinate:on -d",
+        "MAC|caffeinate:on; echo injected",
+        "MAC|caffeinate:off|extra",
     ],
 )
 def test_parse_message_rejects_invalid_or_unregistered_commands(message):
@@ -69,7 +76,10 @@ def test_parse_message_accepts_registered_command_with_line_ending():
     assert automation.parse_message("MAC|auto:notion\n") == "auto:notion"
 
 
-@pytest.mark.parametrize("command", ["health", "tailscale:on", "tailscale:off"])
+@pytest.mark.parametrize(
+    "command",
+    ["health", "tailscale:on", "tailscale:off", "caffeinate:on", "caffeinate:off"],
+)
 def test_parse_message_accepts_registered_commands(command):
     assert automation.parse_message(f"MAC|{command}") == command
 
@@ -518,3 +528,286 @@ def test_simultaneous_launches_start_only_one_job(isolated_app):
     assert sum(result.stdout == "ALREADY_RUNNING\n" for result in results) == 3
     wait_until(lambda: (app_dir / "started").exists())
     assert len((app_dir / "started").read_text().splitlines()) == 1
+
+
+@pytest.mark.parametrize(
+    ("now", "expected_seconds"),
+    [
+        (datetime(2026, 11, 24, 22, 0, 0), 7199),
+        (datetime(2026, 11, 24, 23, 59, 58, 200000), 1),
+        (datetime(2026, 11, 24, 23, 59, 59, 0), 0),
+        (datetime(2026, 11, 24, 23, 59, 59, 500000), 0),
+    ],
+)
+def test_calculate_caffeinate_timeout_targets_end_of_day(now, expected_seconds):
+    timeout_seconds, until = automation.calculate_caffeinate_timeout(now)
+    assert timeout_seconds == expected_seconds
+    assert until == datetime(2026, 11, 24, 23, 59, 59)
+
+
+def test_find_caffeinate_prefers_path():
+    with patch.object(
+        automation.shutil, "which", return_value="/custom/bin/caffeinate"
+    ) as which:
+        assert automation.find_caffeinate() == "/custom/bin/caffeinate"
+    which.assert_called_once_with("caffeinate")
+
+
+def test_find_caffeinate_falls_back_to_system_path():
+    with patch.object(
+        automation.shutil,
+        "which",
+        side_effect=lambda name: "/usr/bin/caffeinate"
+        if name == "/usr/bin/caffeinate"
+        else None,
+    ):
+        assert automation.find_caffeinate() == "/usr/bin/caffeinate"
+
+
+def test_find_caffeinate_raises_when_missing():
+    with patch.object(automation.shutil, "which", return_value=None):
+        with pytest.raises(FileNotFoundError, match="caffeinate"):
+            automation.find_caffeinate()
+
+
+@pytest.mark.parametrize("via_stdin", [True, False])
+def test_caffeinate_on_launches_detached_process_until_end_of_day(
+    via_stdin, tmp_path, capsys
+):
+    fixed_now = datetime(2026, 11, 24, 22, 0, 0)
+    with (
+        patch.object(automation, "find_caffeinate", return_value="/usr/bin/caffeinate"),
+        patch.object(automation, "get_current_datetime", return_value=fixed_now),
+        patch.object(
+            automation.subprocess, "Popen", return_value=Mock(pid=4321)
+        ) as popen,
+    ):
+        assert invoke("MAC|caffeinate:on", via_stdin=via_stdin) == 0
+
+    popen.assert_called_once()
+    arguments = popen.call_args.args[0]
+    options = popen.call_args.kwargs
+    assert arguments == ["/usr/bin/caffeinate", "-is", "-t", "7199"]
+    assert options["stdin"] == subprocess.DEVNULL
+    assert options["stdout"] == subprocess.DEVNULL
+    assert options["stderr"] == subprocess.DEVNULL
+    assert options["start_new_session"] is True
+    assert options["close_fds"] is True
+    assert len(options["pass_fds"]) == 1
+    assert "shell" not in options
+    assert capsys.readouterr().out == "CAFFEINATE_ON pid=4321 until=2026-11-24T23:59:59\n"
+
+    lock_content = (tmp_path / "state" / "caffeinate.lock").read_text(encoding="utf-8")
+    assert "pid=4321\n" in lock_content
+    assert "until=2026-11-24T23:59:59\n" in lock_content
+    text = event_log(tmp_path / "logs")
+    assert "command=caffeinate:on" in text
+    assert "pid=4321" in text
+
+
+def test_caffeinate_on_skips_when_already_running(tmp_path, capsys):
+    lock_file = automation.acquire_caffeinate_lock()
+    assert lock_file is not None
+    with (
+        lock_file,
+        patch.object(automation, "find_caffeinate", return_value="/usr/bin/caffeinate"),
+        patch.object(
+            automation,
+            "get_current_datetime",
+            return_value=datetime(2026, 11, 24, 22, 0, 0),
+        ),
+        patch.object(automation.subprocess, "Popen") as popen,
+    ):
+        assert invoke("MAC|caffeinate:on") == 0
+    popen.assert_not_called()
+    assert capsys.readouterr().out == "ALREADY_RUNNING\n"
+    assert "重複起動をスキップ" in event_log(tmp_path / "logs")
+
+
+def test_caffeinate_on_skips_when_day_already_expired(tmp_path, capsys):
+    with (
+        patch.object(automation, "find_caffeinate", return_value="/usr/bin/caffeinate"),
+        patch.object(
+            automation,
+            "get_current_datetime",
+            return_value=datetime(2026, 11, 24, 23, 59, 59, 500000),
+        ),
+        patch.object(automation.subprocess, "Popen") as popen,
+    ):
+        assert invoke("MAC|caffeinate:on") == 0
+    popen.assert_not_called()
+    assert capsys.readouterr().out == "ALREADY_EXPIRED\n"
+    assert "期限" in event_log(tmp_path / "logs")
+
+
+def test_caffeinate_on_spawn_failure_releases_lock(tmp_path, capsys):
+    with (
+        patch.object(automation, "find_caffeinate", return_value="/usr/bin/caffeinate"),
+        patch.object(
+            automation,
+            "get_current_datetime",
+            return_value=datetime(2026, 11, 24, 22, 0, 0),
+        ),
+        patch.object(automation.subprocess, "Popen", side_effect=OSError("spawn failed")),
+    ):
+        assert invoke("MAC|caffeinate:on") == 1
+    assert "spawn failed" in capsys.readouterr().err
+    assert "spawn failed" in event_log(tmp_path / "logs")
+    lock_file = automation.acquire_caffeinate_lock()
+    assert lock_file is not None
+    lock_file.close()
+
+
+def test_caffeinate_on_missing_cli_does_not_spawn(tmp_path, capsys):
+    with (
+        patch.object(automation.shutil, "which", return_value=None),
+        patch.object(automation.subprocess, "Popen") as popen,
+    ):
+        assert invoke("MAC|caffeinate:on") == 1
+    popen.assert_not_called()
+    assert "caffeinate" in capsys.readouterr().err
+    assert "caffeinate" in event_log(tmp_path / "logs")
+
+
+def test_caffeinate_off_returns_not_running_when_no_lock_exists(tmp_path, capsys):
+    with patch.object(automation.os, "kill") as kill:
+        assert invoke("MAC|caffeinate:off") == 0
+    kill.assert_not_called()
+    assert capsys.readouterr().out == "NOT_RUNNING\n"
+    assert "command=caffeinate:off" in event_log(tmp_path / "logs")
+
+
+def test_caffeinate_off_returns_not_running_when_lock_is_not_held(tmp_path, capsys):
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "caffeinate.lock").write_text("pid=99999\n", encoding="utf-8")
+    with patch.object(automation.os, "kill") as kill:
+        assert invoke("MAC|caffeinate:off") == 0
+    kill.assert_not_called()
+    assert capsys.readouterr().out == "NOT_RUNNING\n"
+
+
+def test_caffeinate_off_stops_verified_running_caffeinate(tmp_path, capsys):
+    lock_file = automation.acquire_caffeinate_lock()
+    assert lock_file is not None
+    lock_file.write("pid=54321\nuntil=2026-11-24T23:59:59\n")
+    lock_file.flush()
+
+    def release_lock_on_kill(pid, sig):
+        assert pid == 54321
+        assert sig == automation.signal.SIGTERM
+        lock_file.close()
+
+    try:
+        with (
+            patch.object(automation, "is_caffeinate_process", return_value=True),
+            patch.object(
+                automation.os, "kill", side_effect=release_lock_on_kill
+            ) as kill,
+        ):
+            assert invoke("MAC|caffeinate:off") == 0
+    finally:
+        if not lock_file.closed:
+            lock_file.close()
+
+    kill.assert_called_once_with(54321, automation.signal.SIGTERM)
+    assert capsys.readouterr().out == "CAFFEINATE_OFF\n"
+    assert "停止しました" in event_log(tmp_path / "logs")
+
+
+def test_caffeinate_off_refuses_to_kill_non_caffeinate_process(tmp_path, capsys):
+    lock_file = automation.acquire_caffeinate_lock()
+    assert lock_file is not None
+    lock_file.write("pid=54321\n")
+    lock_file.flush()
+    try:
+        with (
+            patch.object(automation, "is_caffeinate_process", return_value=False),
+            patch.object(automation.os, "kill") as kill,
+        ):
+            assert invoke("MAC|caffeinate:off") == 1
+    finally:
+        lock_file.close()
+
+    kill.assert_not_called()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "caffeinate" in captured.err
+    assert "caffeinate" in event_log(tmp_path / "logs")
+
+
+def test_caffeinate_off_fails_when_process_does_not_exit_in_time(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(automation, "CAFFEINATE_STOP_TIMEOUT_SECONDS", 0.05)
+    lock_file = automation.acquire_caffeinate_lock()
+    assert lock_file is not None
+    lock_file.write("pid=54321\n")
+    lock_file.flush()
+    try:
+        with (
+            patch.object(automation, "is_caffeinate_process", return_value=True),
+            patch.object(automation.os, "kill") as kill,
+        ):
+            assert invoke("MAC|caffeinate:off") == 1
+    finally:
+        lock_file.close()
+
+    kill.assert_called_once_with(54321, automation.signal.SIGTERM)
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "終了を確認できませんでした" in captured.err
+
+
+def test_real_caffeinate_on_duplicate_off_and_restart(tmp_path):
+    if shutil.which("/usr/bin/caffeinate") is None:
+        pytest.skip("/usr/bin/caffeinate is not available")
+    if datetime.now().hour == 23 and datetime.now().minute == 59 and datetime.now().second >= 58:
+        pytest.skip("Too close to 23:59:59 boundary for real caffeinate test")
+
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    shutil.copy2(automation.SCRIPT_DIR / "message_automation.py", app_dir)
+    environment = {
+        **os.environ,
+        "HOME": str(tmp_path / "home"),
+        automation.LOG_DIR_ENV: str(tmp_path / "logs"),
+    }
+    on_cmd = [sys.executable, str(app_dir / "message_automation.py"), "MAC|caffeinate:on"]
+    off_cmd = [sys.executable, str(app_dir / "message_automation.py"), "MAC|caffeinate:off"]
+
+    try:
+        started = subprocess.run(
+            on_cmd, input="", capture_output=True, text=True, env=environment, timeout=5
+        )
+        assert started.returncode == 0
+        assert started.stdout.startswith("CAFFEINATE_ON pid=")
+        assert "until=" in started.stdout
+
+        duplicate = subprocess.run(
+            on_cmd, input="", capture_output=True, text=True, env=environment, timeout=5
+        )
+        assert duplicate.returncode == 0
+        assert duplicate.stdout == "ALREADY_RUNNING\n"
+
+        stopped = subprocess.run(
+            off_cmd, input="", capture_output=True, text=True, env=environment, timeout=5
+        )
+        assert stopped.returncode == 0
+        assert stopped.stdout == "CAFFEINATE_OFF\n"
+
+        stopped_again = subprocess.run(
+            off_cmd, input="", capture_output=True, text=True, env=environment, timeout=5
+        )
+        assert stopped_again.returncode == 0
+        assert stopped_again.stdout == "NOT_RUNNING\n"
+
+        restarted = subprocess.run(
+            on_cmd, input="", capture_output=True, text=True, env=environment, timeout=5
+        )
+        assert restarted.returncode == 0
+        assert restarted.stdout.startswith("CAFFEINATE_ON pid=")
+    finally:
+        subprocess.run(
+            off_cmd, input="", capture_output=True, text=True, env=environment, timeout=5
+        )
